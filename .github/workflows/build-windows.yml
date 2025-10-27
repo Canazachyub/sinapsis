@@ -29,7 +29,7 @@ jobs:
           echo "SUPABASE_URL=https://placeholder.supabase.co" > .env
           echo "SUPABASE_ANON_KEY=placeholder-anon-key" >> .env
           echo "SENTRY_DSN=https://placeholder-sentry-dsn" >> .env
-          echo "APP_ENV=development" >> .env
+          echo "APP_ENV=demo" >> .env
 
       - name: Get Dependencies
         run: flutter pub get
