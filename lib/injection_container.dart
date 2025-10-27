@@ -106,7 +106,8 @@ Future<void> init() async {
   // Auth - Data Sources
   // Detectar modo demo
   final isDemoMode = dotenv.env['APP_ENV'] == 'demo' ||
-                     dotenv.env['SUPABASE_URL']?.contains('tu-proyecto') == true;
+                     dotenv.env['SUPABASE_URL']?.contains('tu-proyecto') == true ||
+                     dotenv.env['SUPABASE_URL']?.contains('placeholder') == true;
 
   if (isDemoMode) {
     // Modo DEMO: usar mock local sin Supabase
@@ -187,7 +188,8 @@ Future<void> init() async {
     final supabaseKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
 
     if (supabaseUrl.isNotEmpty && supabaseKey.isNotEmpty &&
-        !supabaseUrl.contains('tu-proyecto')) {
+        !supabaseUrl.contains('tu-proyecto') &&
+        !supabaseUrl.contains('placeholder')) {
       final supabase = await Supabase.initialize(
         url: supabaseUrl,
         anonKey: supabaseKey,
