@@ -1,0 +1,111 @@
+name: sinapsis
+description: "Sistema Integral de Estudio y Repaso Activo - Aplicación multiplataforma de estudio con flashcards, cloze tests y sincronización en tiempo real"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI
+  cupertino_icons: ^1.0.8
+
+  # State Management
+  flutter_bloc: ^8.1.5
+  equatable: ^2.0.5
+
+  # Local Database
+  drift: ^2.14.1
+  sqlite3_flutter_libs: ^0.5.20
+  path_provider: ^2.1.2
+  path: ^1.9.0
+
+  # Network
+  dio: ^5.4.0
+  pretty_dio_logger: ^1.3.1
+
+  # Supabase
+  supabase_flutter: ^2.3.4
+
+  # Dependency Injection
+  get_it: ^7.6.4
+  injectable: ^2.3.2
+
+  # Code Generation
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.8.1
+
+  # Rich Text Editor
+  flutter_quill: ^9.3.20
+
+  # Code Highlighting
+  flutter_highlight: ^0.7.0
+
+  # Image Handling
+  image_picker: ^1.0.7
+  cached_network_image: ^3.3.1
+
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.3.3
+  shared_preferences: ^2.2.2
+  flutter_dotenv: ^5.1.0
+  logger: ^2.0.2+1
+  dartz: ^0.10.1
+
+  # UI Components
+  shimmer: ^3.0.0
+  flutter_svg: ^2.0.10+1
+
+  # Markdown
+  flutter_markdown: ^0.6.20
+  markdown: ^7.2.1
+
+  # LaTeX - Sin paquete externo por conflictos de dependencias
+  # Usando renderizado custom
+
+  # Clipboard
+  clipboard: ^0.1.3
+  super_clipboard: ^0.8.20          # Portapapeles avanzado multiplataforma
+
+  # Drag & Drop
+  desktop_drop: ^0.4.4              # Drag & drop para desktop
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # Linting
+  flutter_lints: ^4.0.0
+
+  # Code Generation
+  build_runner: ^2.4.8
+  freezed: ^2.4.6
+  json_serializable: ^6.7.1
+  drift_dev: ^2.14.1
+  injectable_generator: ^2.4.1
+
+  # Testing
+  mockito: ^5.4.4
+  bloc_test: ^9.1.6
+
+flutter:
+  uses-material-design: true
+
+  # Assets
+  assets:
+    - assets/images/
+    - assets/icons/
+    - .env
+
+  # Fonts
+  # fonts:
+  #   - family: Roboto
+  #     fonts:
+  #       - asset: assets/fonts/Roboto-Regular.ttf
+  #       - asset: assets/fonts/Roboto-Bold.ttf
+  #         weight: 700
