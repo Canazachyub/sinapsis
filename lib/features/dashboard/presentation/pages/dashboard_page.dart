@@ -3,8 +3,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../courses/presentation/pages/courses_page.dart';
 import '../../../pomodoro/presentation/widgets/pomodoro_timer_widget.dart';
-import '../../../pomodoro/presentation/widgets/floating_pomodoro_widget.dart';
 import '../../../notes/presentation/pages/review_page.dart';
+import '../../../theme/presentation/bloc/theme_bloc.dart';
+import '../../../theme/presentation/bloc/theme_event.dart';
+import '../../../theme/presentation/bloc/theme_state.dart';
 import '../bloc/dashboard_bloc.dart';
 import 'srs_stats_page.dart';
 
@@ -33,12 +35,7 @@ class _DashboardPageState extends State<DashboardPage> {
         }
       },
       child: Scaffold(
-        body: Stack(
-          children: [
-            _pages[_selectedIndex],
-            const FloatingPomodoroWidget(),
-          ],
-        ),
+        body: _pages[_selectedIndex],
         bottomNavigationBar: NavigationBar(
           selectedIndex: _selectedIndex,
           onDestinationSelected: (index) {
@@ -512,6 +509,48 @@ class _ProfilePage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 32),
+
+                // Sección de Apariencia
+                Text(
+                  'Apariencia',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: BlocBuilder<ThemeBloc, ThemeState>(
+                    builder: (context, themeState) {
+                      String themeLabel;
+                      IconData themeIcon;
+
+                      switch (themeState.themeMode) {
+                        case ThemeMode.light:
+                          themeLabel = 'Claro';
+                          themeIcon = Icons.light_mode;
+                          break;
+                        case ThemeMode.dark:
+                          themeLabel = 'Oscuro';
+                          themeIcon = Icons.dark_mode;
+                          break;
+                        case ThemeMode.system:
+                          themeLabel = 'Sistema';
+                          themeIcon = Icons.brightness_auto;
+                          break;
+                      }
+
+                      return ListTile(
+                        leading: Icon(themeIcon),
+                        title: const Text('Tema de la interfaz'),
+                        subtitle: Text(themeLabel),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _showThemeDialog(context, themeState.themeMode),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 24),
+
                 const Divider(),
                 ListTile(
                   leading: const Icon(Icons.logout),
@@ -526,6 +565,104 @@ class _ProfilePage extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         },
       ),
+    );
+  }
+
+  Future<void> _showThemeDialog(BuildContext context, ThemeMode currentMode) async {
+    final result = await showDialog<ThemeMode>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Seleccionar tema'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _ThemeOption(
+              mode: ThemeMode.system,
+              label: 'Automático (Sistema)',
+              subtitle: 'Sigue la configuración del dispositivo',
+              icon: Icons.brightness_auto,
+              isSelected: currentMode == ThemeMode.system,
+            ),
+            const Divider(),
+            _ThemeOption(
+              mode: ThemeMode.light,
+              label: 'Claro',
+              subtitle: 'Siempre usar tema claro',
+              icon: Icons.light_mode,
+              isSelected: currentMode == ThemeMode.light,
+            ),
+            const Divider(),
+            _ThemeOption(
+              mode: ThemeMode.dark,
+              label: 'Oscuro',
+              subtitle: 'Siempre usar tema oscuro',
+              icon: Icons.dark_mode,
+              isSelected: currentMode == ThemeMode.dark,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result != currentMode && context.mounted) {
+      context.read<ThemeBloc>().add(ThemeChanged(result));
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tema actualizado correctamente'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+}
+
+class _ThemeOption extends StatelessWidget {
+  final ThemeMode mode;
+  final String label;
+  final String subtitle;
+  final IconData icon;
+  final bool isSelected;
+
+  const _ThemeOption({
+    required this.mode,
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.isSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(
+        icon,
+        color: isSelected
+            ? Theme.of(context).colorScheme.primary
+            : null,
+      ),
+      title: Text(
+        label,
+        style: TextStyle(
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary
+              : null,
+        ),
+      ),
+      subtitle: Text(subtitle),
+      trailing: isSelected
+          ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+          : null,
+      onTap: () => Navigator.pop(context, mode),
     );
   }
 }

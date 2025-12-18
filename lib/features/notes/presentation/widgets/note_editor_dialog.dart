@@ -64,69 +64,75 @@ class _NoteEditorDialogState extends State<NoteEditorDialog> {
         ),
         body: Column(
           children: [
-            // Título
+            // Título y Tags en una fila compacta
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: TextField(
-                controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Título del documento',
-                  border: OutlineInputBorder(),
-                  hintText: 'Ej: Anatomía del Corazón, Ciclo de Krebs...',
-                ),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-
-            // Tags
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
-                    'Tags',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      ..._tags.map((tag) => Chip(
-                            label: Text(tag),
-                            onDeleted: () {
-                              setState(() => _tags.remove(tag));
-                            },
-                          )),
-                      ActionChip(
-                        label: const Text('+ Tag'),
-                        avatar: const Icon(Icons.add, size: 16),
-                        onPressed: _showAddTagDialog,
+                  // Título expandido
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: _titleController,
+                      decoration: const InputDecoration(
+                        labelText: 'Título del documento',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        isDense: true,
                       ),
-                    ],
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(width: 12),
+                  // Tags compactos
+                  Expanded(
+                    flex: 1,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Tags: ', style: Theme.of(context).textTheme.labelSmall),
+                          ..._tags.map((tag) => Padding(
+                                padding: const EdgeInsets.only(right: 4),
+                                child: Chip(
+                                  label: Text(tag, style: const TextStyle(fontSize: 11)),
+                                  onDeleted: () => setState(() => _tags.remove(tag)),
+                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                                ),
+                              )),
+                          ActionChip(
+                            label: const Text('+ Tag', style: TextStyle(fontSize: 11)),
+                            onPressed: _showAddTagDialog,
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
 
-            // Editor de contenido
+            // Editor de contenido - sin Card extra para ahorrar espacio
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: RichDocumentEditor(
-                      initialContent: _content.isEmpty ? null : _content,
-                      onContentChanged: (content) {
-                        _content = content;
-                      },
-                    ),
-                  ),
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: RichDocumentEditor(
+                  initialContent: _content.isEmpty ? null : _content,
+                  onContentChanged: (content) {
+                    _content = content;
+                  },
                 ),
               ),
             ),

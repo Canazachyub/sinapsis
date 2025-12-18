@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:sinapsis/core/constants/image_constants.dart';
+import 'image_fullscreen_viewer.dart';
 import 'latex_occlusion_editor.dart';
 import 'table_occlusion_editor.dart';
 
@@ -269,8 +270,13 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
           try {
             final data = jsonDecode(insert['image_occluded']) as Map<String, dynamic>;
             final imagePath = data['path'] as String;
+            debugPrint('=== STUDY VIEWER: Cargando imagen ===');
+            debugPrint('imagePath: $imagePath');
+            debugPrint('File exists: ${File(imagePath).existsSync()}');
             final aspectRatio = (data['aspectRatio'] as num?)?.toDouble() ?? 1.0;
             final occlusionsData = data['occlusions'] as List<dynamic>?;
+            final annotationsData = data['annotations'] as List<dynamic>?;
+            final drawingsData = data['drawings'] as List<dynamic>?;
 
             final occlusions = occlusionsData?.map((o) {
               final oMap = o as Map<String, dynamic>;
@@ -282,6 +288,17 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
               );
             }).toList() ?? [];
 
+            final annotations = annotationsData?.map((a) => a as Map<String, dynamic>).toList() ?? [];
+            final drawings = drawingsData?.map((d) => d as Map<String, dynamic>).toList() ?? [];
+
+            // Convertir oclusiones de Rect a Map para compatibilidad
+            final occlusionsMap = occlusions.map((r) => {
+              'left': r.left,
+              'top': r.top,
+              'right': r.right,
+              'bottom': r.bottom,
+            }).toList();
+
             children.add(
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -289,6 +306,9 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
                   imagePath: imagePath,
                   aspectRatio: aspectRatio,
                   occlusions: occlusions,
+                  annotations: annotations,
+                  drawings: drawings,
+                  occlusionsMap: occlusionsMap,
                   imageIndex: imageIndex,
                   initialRevealedOcclusions: _revealedImageOcclusions[imageIndex] ?? {},
                   showAll: widget.showOcclusions,
@@ -804,6 +824,9 @@ class _StudyImageWidget extends StatefulWidget {
   final String imagePath;
   final double aspectRatio;
   final List<Rect> occlusions;
+  final List<Map<String, dynamic>> annotations;
+  final List<Map<String, dynamic>> drawings;
+  final List<Map<String, dynamic>> occlusionsMap;
   final int imageIndex;
   final Set<int> initialRevealedOcclusions;
   final bool showAll;
@@ -813,6 +836,9 @@ class _StudyImageWidget extends StatefulWidget {
     required this.imagePath,
     required this.aspectRatio,
     required this.occlusions,
+    required this.annotations,
+    required this.drawings,
+    required this.occlusionsMap,
     required this.imageIndex,
     required this.initialRevealedOcclusions,
     required this.showAll,
@@ -851,66 +877,99 @@ class _StudyImageWidgetState extends State<_StudyImageWidget> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(ImageConstants.imageCenterPadding),
-        child: SizedBox(
-          width: width,
-          height: height,
-          child: GestureDetector(
-            onTapUp: (details) {
-              if (widget.showAll) return;
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: width,
+              height: height,
+              child: GestureDetector(
+                onTapUp: (details) {
+                  if (widget.showAll) return;
 
-              final tapPosition = details.localPosition;
+                  final tapPosition = details.localPosition;
 
-              // Encontrar qué oclusión se tocó (usando coordenadas directas)
-              for (int i = 0; i < widget.occlusions.length; i++) {
-                final occ = widget.occlusions[i];
-                // Convertir coordenadas normalizadas a absolutas
-                final occRect = Rect.fromLTRB(
-                  occ.left * width,
-                  occ.top * height,
-                  occ.right * width,
-                  occ.bottom * height,
-                );
-
-                if (occRect.contains(tapPosition)) {
-                  _toggleOcclusion(i);
-                  break;
-                }
-              }
-            },
-            child: Stack(
-              children: [
-                // Imagen con tamaño fijo
-                Image.file(
-                  File(widget.imagePath),
-                  width: width,
-                  height: height,
-                  fit: BoxFit.fill,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      padding: const EdgeInsets.all(16),
-                      color: Colors.grey.shade200,
-                      child: const Text('Imagen no disponible'),
+                  // Encontrar qué oclusión se tocó (usando coordenadas directas)
+                  for (int i = 0; i < widget.occlusions.length; i++) {
+                    final occ = widget.occlusions[i];
+                    // Convertir coordenadas normalizadas a absolutas
+                    final occRect = Rect.fromLTRB(
+                      occ.left * width,
+                      occ.top * height,
+                      occ.right * width,
+                      occ.bottom * height,
                     );
-                  },
+
+                    if (occRect.contains(tapPosition)) {
+                      _toggleOcclusion(i);
+                      break;
+                    }
+                  }
+                },
+                child: Stack(
+                  children: [
+                    // Imagen con tamaño fijo
+                    Image.file(
+                      File(widget.imagePath),
+                      width: width,
+                      height: height,
+                      fit: BoxFit.fill,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          padding: const EdgeInsets.all(16),
+                          color: Colors.grey.shade200,
+                          child: const Text('Imagen no disponible'),
+                        );
+                      },
+                    ),
+                    // Overlay de oclusiones - con SizedBox para forzar tamaño exacto
+                    if (widget.occlusions.isNotEmpty)
+                      SizedBox(
+                        width: width,
+                        height: height,
+                        child: CustomPaint(
+                          painter: _OcclusionOverlayPainter(
+                            occlusions: widget.occlusions,
+                            revealedIndices: widget.showAll
+                                ? Set.from(List.generate(widget.occlusions.length, (i) => i))
+                                : _revealedOcclusions,
+                            imageSize: Size(width, height),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                // Overlay de oclusiones - con SizedBox para forzar tamaño exacto
-                if (widget.occlusions.isNotEmpty)
-                  SizedBox(
-                    width: width,
-                    height: height,
-                    child: CustomPaint(
-                      painter: _OcclusionOverlayPainter(
-                        occlusions: widget.occlusions,
-                        revealedIndices: widget.showAll
-                            ? Set.from(List.generate(widget.occlusions.length, (i) => i))
-                            : _revealedOcclusions,
-                        imageSize: Size(width, height),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Botón de fullscreen para ampliar con zoom
+            SizedBox(
+              width: width,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.fullscreen, size: 20),
+                label: const Text('Ver en pantalla completa'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      fullscreenDialog: true,
+                      builder: (context) => ImageFullscreenViewer(
+                        imagePath: widget.imagePath,
+                        annotations: widget.annotations,
+                        drawings: widget.drawings,
+                        occlusions: widget.occlusionsMap,
+                        isStudyMode: true,
+                        initialShowOcclusions: !widget.showAll,
+                        initialShowAnnotations: true,
                       ),
                     ),
-                  ),
-              ],
+                  );
+                },
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );

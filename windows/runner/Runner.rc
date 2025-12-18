@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.sinapsis" "\0"
-            VALUE "FileDescription", "sinapsis" "\0"
+            VALUE "CompanyName", "Sinapsis Team" "\0"
+            VALUE "FileDescription", "Sinapsis - Sistema de Estudio con Flashcards y Repaso Espaciado" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "sinapsis" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.sinapsis. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 Sinapsis Team. All rights reserved." "\0"
             VALUE "OriginalFilename", "sinapsis.exe" "\0"
-            VALUE "ProductName", "sinapsis" "\0"
+            VALUE "ProductName", "Sinapsis" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

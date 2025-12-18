@@ -6,7 +6,11 @@ import 'features/auth/presentation/bloc/auth_bloc.dart';
 import 'features/courses/presentation/bloc/courses_bloc.dart';
 import 'features/notes/presentation/bloc/notes_bloc.dart';
 import 'features/pomodoro/presentation/bloc/pomodoro_bloc.dart';
+import 'features/pomodoro/presentation/widgets/floating_pomodoro_widget.dart';
 import 'features/dashboard/presentation/bloc/dashboard_bloc.dart';
+import 'features/theme/presentation/bloc/theme_bloc.dart';
+import 'features/theme/presentation/bloc/theme_event.dart';
+import 'features/theme/presentation/bloc/theme_state.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/register_page.dart';
 import 'features/dashboard/presentation/pages/dashboard_page.dart';
@@ -37,19 +41,41 @@ class SinapsisApp extends StatelessWidget {
           ),
           lazy: false, // Mantener activo siempre
         ),
+        BlocProvider(
+          create: (context) => sl<ThemeBloc>()..add(ThemeLoaded()),
+        ),
       ],
-      child: MaterialApp(
-        title: 'Sinapsis',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme,
-        darkTheme: AppTheme.darkTheme,
-        themeMode: ThemeMode.system,
-        initialRoute: '/splash',
-        routes: {
-          '/splash': (context) => const SplashPage(),
-          '/login': (context) => const LoginPage(),
-          '/register': (context) => const RegisterPage(),
-          '/dashboard': (context) => const DashboardPage(),
+      child: BlocBuilder<ThemeBloc, ThemeState>(
+        builder: (context, themeState) {
+          return MaterialApp(
+            title: 'Sinapsis',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeState.themeMode,
+            initialRoute: '/splash',
+            routes: {
+              '/splash': (context) => const SplashPage(),
+              '/login': (context) => const LoginPage(),
+              '/register': (context) => const RegisterPage(),
+              '/dashboard': (context) => const DashboardPage(),
+            },
+            builder: (context, child) {
+              // Usar Overlay para que los Tooltips funcionen correctamente
+              return Overlay(
+                initialEntries: [
+                  OverlayEntry(
+                    builder: (context) => Stack(
+                      children: [
+                        child ?? const SizedBox.shrink(),
+                        const FloatingPomodoroWidget(),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
         },
       ),
     );

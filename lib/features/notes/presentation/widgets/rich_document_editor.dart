@@ -15,6 +15,8 @@ import 'package:sinapsis/core/utils/markdown_to_quill.dart';
 import 'package:sinapsis/core/utils/quill_to_markdown.dart';
 import 'package:sinapsis/core/utils/clipboard_handler.dart';
 import 'image_occlusion_editor.dart';
+import 'image_annotation_editor.dart';
+import 'image_fullscreen_viewer.dart';
 import 'latex_occlusion_editor.dart';
 import 'table_occlusion_editor.dart';
 
@@ -178,6 +180,8 @@ class ImageOccludedEmbedBuilder extends quill.EmbedBuilder {
       final imagePath = data['path'] as String;
       final aspectRatio = (data['aspectRatio'] as num?)?.toDouble() ?? 1.0;
       final occlusionsData = data['occlusions'] as List<dynamic>?;
+      final annotationsData = data['annotations'] as List<dynamic>?;
+      final drawingsData = data['drawings'] as List<dynamic>?;
 
       final occlusions = occlusionsData?.map((o) {
         final oMap = o as Map<String, dynamic>;
@@ -189,15 +193,196 @@ class ImageOccludedEmbedBuilder extends quill.EmbedBuilder {
         );
       }).toList() ?? [];
 
-      // Necesitamos pasar una referencia a este builder para poder editar las oclusiones
-      // Por ahora, mostrar sin capacidad de edición desde aquí
+      final annotations = annotationsData?.map((a) => a as Map<String, dynamic>).toList() ?? [];
+      final drawings = drawingsData?.map((d) => d as Map<String, dynamic>).toList() ?? [];
+
+      // Convertir oclusiones de Rect a Map para compatibilidad
+      final occlusionsMap = occlusions.map((r) => {
+        'left': r.left,
+        'top': r.top,
+        'right': r.right,
+        'bottom': r.bottom,
+      }).toList();
+
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
         child: _OccludedImageWidget(
           imagePath: imagePath,
           aspectRatio: aspectRatio,
           occlusions: occlusions,
-          onEditOcclusions: null, // No editable desde el EmbedBuilder
+          annotations: annotations,
+          drawings: drawings,
+          onEditOcclusions: null, // Funcionalidad existente mantenida
+          onEditAnnotations: readOnly ? null : () async {
+            // Añadir/editar anotaciones
+            final result = await showDialog<Map<String, dynamic>>(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => Dialog(
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.9,
+                  height: MediaQuery.of(context).size.height * 0.9,
+                  child: ImageAnnotationEditor(
+                    imagePath: imagePath,
+                    aspectRatio: aspectRatio,
+                    existingAnnotations: annotations,
+                    existingDrawings: drawings,
+                    occlusions: occlusionsMap,
+                  ),
+                ),
+              ),
+            );
+            if (result != null) {
+              debugPrint('=== RESULTADO DEL EDITOR DE ANOTACIONES ===');
+              debugPrint('Keys en result: ${result.keys.toList()}');
+
+              // Verificar si hay imagen modificada (bytes)
+              final imageBytes = result['imageBytes'] as Uint8List?;
+              String finalImagePath = imagePath;
+
+              debugPrint('imageBytes recibidos: ${imageBytes?.length ?? 0} bytes');
+              debugPrint('imagePath original: $imagePath');
+
+              if (imageBytes != null) {
+                // Guardar la imagen modificada como nuevo archivo
+                try {
+                  final appDir = await getApplicationDocumentsDirectory();
+                  debugPrint('appDir: ${appDir.path}');
+
+                  final annotatedDir = Directory('${appDir.path}/sinapsis/annotated');
+                  if (!await annotatedDir.exists()) {
+                    await annotatedDir.create(recursive: true);
+                    debugPrint('Directorio creado: ${annotatedDir.path}');
+                  } else {
+                    debugPrint('Directorio ya existe: ${annotatedDir.path}');
+                  }
+
+                  final timestamp = DateTime.now().millisecondsSinceEpoch;
+                  final newFileName = 'annotated_$timestamp.png';
+                  final newFile = File('${annotatedDir.path}/$newFileName');
+                  await newFile.writeAsBytes(imageBytes);
+
+                  // VERIFICAR que se guardó correctamente
+                  if (await newFile.exists()) {
+                    final savedSize = await newFile.length();
+                    debugPrint('✓ Archivo guardado: ${newFile.path} ($savedSize bytes)');
+                    finalImagePath = newFile.path;
+                  } else {
+                    debugPrint('✗ ERROR: Archivo no existe después de guardar');
+                  }
+                } catch (e, stack) {
+                  debugPrint('✗ Error guardando imagen anotada: $e');
+                  debugPrint('Stack: $stack');
+                }
+              } else {
+                debugPrint('⚠ imageBytes es null - no hay imagen para guardar');
+              }
+
+              debugPrint('finalImagePath: $finalImagePath');
+
+              final newAnnotations = result['annotations'] as List<Map<String, dynamic>>? ?? [];
+              final newDrawings = result['drawings'] as List<Map<String, dynamic>>? ?? [];
+
+              // Encontrar el índice del embed actual usando Delta directamente
+              final delta = controller.document.toDelta();
+              int embedIndex = -1;
+              int currentOffset = 0;
+
+              debugPrint('Buscando embed con path: $imagePath');
+
+              for (final op in delta.toList()) {
+                final data = op.data;
+                debugPrint('Op data type: ${data.runtimeType}');
+
+                if (data is Map) {
+                  // Verificar si es nuestro image_occluded embed
+                  if (data.containsKey('image_occluded')) {
+                    try {
+                      final embedJson = data['image_occluded'] as String;
+                      final embedData = jsonDecode(embedJson) as Map<String, dynamic>;
+                      debugPrint('Encontrado embed con path: ${embedData['path']}');
+
+                      if (embedData['path'] == imagePath) {
+                        embedIndex = currentOffset;
+                        debugPrint('✓ Match encontrado en offset: $embedIndex');
+                        break;
+                      }
+                    } catch (e) {
+                      debugPrint('Error parsing embed: $e');
+                    }
+                  }
+                }
+                currentOffset += op.length ?? 1;
+              }
+
+              debugPrint('embedIndex encontrado: $embedIndex');
+
+              if (embedIndex != -1) {
+                // Crear nuevo embed con imagen modificada
+                final updatedData = {
+                  'path': finalImagePath, // Usar la imagen con anotaciones
+                  'aspectRatio': aspectRatio,
+                  'occlusions': occlusionsData,
+                  'annotations': newAnnotations,
+                  'drawings': newDrawings,
+                };
+                debugPrint('updatedData path: ${updatedData['path']}');
+
+                // Reemplazar el embed
+                controller.replaceText(
+                  embedIndex,
+                  1,
+                  quill.BlockEmbed('image_occluded', jsonEncode(updatedData)),
+                  TextSelection.collapsed(offset: embedIndex),
+                );
+
+                // Forzar actualización del widget moviendo el cursor
+                controller.updateSelection(
+                  TextSelection.collapsed(offset: embedIndex + 1),
+                  quill.ChangeSource.local,
+                );
+
+                // Pequeño delay para permitir que el widget se reconstruya
+                Future.delayed(const Duration(milliseconds: 100), () {
+                  if (context.mounted) {
+                    // Forzar rebuild moviendo cursor de nuevo
+                    controller.updateSelection(
+                      TextSelection.collapsed(offset: embedIndex),
+                      quill.ChangeSource.local,
+                    );
+                  }
+                });
+
+                // Mostrar confirmación (solo si el widget sigue montado)
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('✓ Anotaciones guardadas'),
+                      backgroundColor: Colors.green,
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                }
+              }
+            }
+          },
+          onViewFullscreen: () {
+            // Ver imagen ampliada con zoom
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                fullscreenDialog: true,
+                builder: (context) => ImageFullscreenViewer(
+                  imagePath: imagePath,
+                  annotations: annotations,
+                  drawings: drawings,
+                  occlusions: occlusionsMap,
+                  isStudyMode: false,
+                  initialShowOcclusions: true,
+                  initialShowAnnotations: true,
+                ),
+              ),
+            );
+          },
         ),
       );
     } catch (e) {
@@ -1120,13 +1305,21 @@ class _OccludedImageWidget extends StatelessWidget {
   final String imagePath;
   final double aspectRatio;
   final List<Rect> occlusions;
+  final List<Map<String, dynamic>> annotations;
+  final List<Map<String, dynamic>> drawings;
   final VoidCallback? onEditOcclusions;
+  final VoidCallback? onEditAnnotations;
+  final VoidCallback? onViewFullscreen;
 
   const _OccludedImageWidget({
     required this.imagePath,
     required this.aspectRatio,
     required this.occlusions,
+    this.annotations = const [],
+    this.drawings = const [],
     this.onEditOcclusions,
+    this.onEditAnnotations,
+    this.onViewFullscreen,
   });
 
   @override
@@ -1137,70 +1330,105 @@ class _OccludedImageWidget extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(ImageConstants.imageCenterPadding),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            width: width,
-            height: height,
-            child: Stack(
-              children: [
-                Image.file(
-                  File(imagePath),
-                  width: width,
-                  height: height,
-                  fit: BoxFit.fill,
-                ),
-                if (occlusions.isNotEmpty)
-                  Positioned.fill(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.orange, width: 2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Align(
-                          alignment: Alignment.topRight,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: onEditOcclusions,
-                              borderRadius: BorderRadius.circular(4),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: width,
+                height: height,
+                child: Stack(
+                  children: [
+                    Image.file(
+                      File(imagePath),
+                      width: width,
+                      height: height,
+                      fit: BoxFit.fill,
+                    ),
+                    if (occlusions.isNotEmpty)
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.orange, width: 2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Align(
+                              alignment: Alignment.topRight,
+                              child: Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: onEditOcclusions,
                                   borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.visibility_off, size: 16, color: Colors.white),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '${occlusions.length} oclusiones',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange,
+                                      borderRadius: BorderRadius.circular(4),
                                     ),
-                                    if (onEditOcclusions != null) ...[
-                                      const SizedBox(width: 4),
-                                      const Icon(Icons.edit, size: 14, color: Colors.white),
-                                    ],
-                                  ],
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.visibility_off, size: 16, color: Colors.white),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${occlusions.length} oclusiones',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        if (onEditOcclusions != null) ...[
+                                          const SizedBox(width: 4),
+                                          const Icon(Icons.edit, size: 14, color: Colors.white),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
                       ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Botones de acción
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                if (onEditOcclusions != null)
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.edit_note, size: 18),
+                    label: const Text('Editar oclusiones'),
+                    onPressed: onEditOcclusions,
+                  ),
+                if (onEditAnnotations != null)
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.draw, size: 18),
+                    label: const Text('Añadir anotaciones'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.secondary,
                     ),
+                    onPressed: onEditAnnotations,
+                  ),
+                if (onViewFullscreen != null)
+                  IconButton(
+                    icon: const Icon(Icons.fullscreen),
+                    tooltip: 'Ver ampliado',
+                    onPressed: onViewFullscreen,
                   ),
               ],
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -1232,6 +1460,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
 
   // Estado para drag & drop
   bool _isDragging = false;
+
+  // Estado para toolbar colapsada
+  bool _isToolbarCollapsed = false;
 
   // Focus node para atajos de teclado
   final _focusNode = FocusNode();
@@ -2272,74 +2503,123 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: quill.QuillToolbar.simple(
-                    configurations: quill.QuillSimpleToolbarConfigurations(
-                      controller: _controller,
-                      sharedConfigurations: const quill.QuillSharedConfigurations(),
-                      showAlignmentButtons: true,
-                      showBackgroundColorButton: true,
-                      showBoldButton: true,
-                      showCenterAlignment: true,
-                      showClearFormat: true,
-                      showCodeBlock: true,
-                      showColorButton: true,
-                      showDirection: false,
-                      showDividers: true,
-                      showFontFamily: false,
-                      showFontSize: false,
-                      showHeaderStyle: true,
-                      showIndent: true,
-                      showInlineCode: true,
-                      showItalicButton: true,
-                      showJustifyAlignment: true,
-                      showLeftAlignment: true,
-                      showLink: true,
-                      showListBullets: true,
-                      showListCheck: true,
-                      showListNumbers: true,
-                      showQuote: true,
-                      showRedo: true,
-                      showRightAlignment: true,
-                      showSearchButton: false,
-                      showSmallButton: false,
-                      showStrikeThrough: true,
-                      showSubscript: false,
-                      showSuperscript: false,
-                      showUnderLineButton: true,
-                      showUndo: true,
+                // Botón para colapsar/expandir toolbar - MÁS VISIBLE
+                Material(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  child: InkWell(
+                    onTap: () => setState(() => _isToolbarCollapsed = !_isToolbarCollapsed),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _isToolbarCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isToolbarCollapsed ? 'Mostrar herramientas' : 'Ocultar herramientas',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: Theme.of(context).colorScheme.onPrimaryContainer,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            _isToolbarCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-                // Botones personalizados - NUEVOS FORMATOS
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
-                    ),
+                // Toolbar colapsable con animación
+                AnimatedCrossFade(
+                  firstChild: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: quill.QuillToolbar.simple(
+                          configurations: quill.QuillSimpleToolbarConfigurations(
+                            controller: _controller,
+                            sharedConfigurations: const quill.QuillSharedConfigurations(),
+                            showAlignmentButtons: true,
+                            showBackgroundColorButton: true,
+                            showBoldButton: true,
+                            showCenterAlignment: true,
+                            showClearFormat: true,
+                            showCodeBlock: true,
+                            showColorButton: true,
+                            showDirection: false,
+                            showDividers: true,
+                            showFontFamily: false,
+                            showFontSize: false,
+                            showHeaderStyle: true,
+                            showIndent: true,
+                            showInlineCode: true,
+                            showItalicButton: true,
+                            showJustifyAlignment: true,
+                            showLeftAlignment: true,
+                            showLink: true,
+                            showListBullets: true,
+                            showListCheck: true,
+                            showListNumbers: true,
+                            showQuote: true,
+                            showRedo: true,
+                            showRightAlignment: true,
+                            showSearchButton: false,
+                            showSmallButton: false,
+                            showStrikeThrough: true,
+                            showSubscript: false,
+                            showSuperscript: false,
+                            showUnderLineButton: true,
+                            showUndo: true,
+                          ),
+                        ),
+                      ),
+                      // Botones personalizados - NUEVOS FORMATOS
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            top: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _buildSuperscriptButton(),
+                              _buildSubscriptButton(),
+                              const VerticalDivider(),
+                              _buildUppercaseButton(),
+                              _buildLowercaseButton(),
+                              _buildCapitalizeButton(),
+                              const VerticalDivider(),
+                              _buildOcclusionButton(),
+                              _buildImageButton(),
+                              _buildLatexButton(),
+                              _buildTableButton(),
+                              _buildMarkdownButton(),
+                              _buildEditOcclusionsButton(),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _buildSuperscriptButton(),
-                        _buildSubscriptButton(),
-                        const VerticalDivider(),
-                        _buildUppercaseButton(),
-                        _buildLowercaseButton(),
-                        _buildCapitalizeButton(),
-                        const VerticalDivider(),
-                        _buildOcclusionButton(),
-                        _buildImageButton(),
-                        _buildLatexButton(),
-                        _buildTableButton(),
-                        _buildMarkdownButton(),
-                        _buildEditOcclusionsButton(),
-                      ],
-                    ),
-                  ),
+                  secondChild: const SizedBox.shrink(),
+                  crossFadeState: _isToolbarCollapsed
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 200),
                 ),
               ],
             ),

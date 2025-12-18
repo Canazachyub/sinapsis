@@ -74,6 +74,7 @@ dependencies:
 
   # Drag & Drop
   desktop_drop: ^0.4.4              # Drag & drop para desktop
+  image_painter: ^0.7.1
 
 dev_dependencies:
   flutter_test:

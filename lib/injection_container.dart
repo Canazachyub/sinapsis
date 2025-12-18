@@ -48,6 +48,10 @@ import 'features/dashboard/presentation/bloc/dashboard_bloc.dart';
 // Pomodoro
 import 'features/pomodoro/data/datasources/pomodoro_datasource.dart';
 
+// Theme
+import 'features/theme/data/theme_preferences.dart';
+import 'features/theme/presentation/bloc/theme_bloc.dart';
+
 final sl = GetIt.instance;
 
 Future<void> init() async {
@@ -86,6 +90,11 @@ Future<void> init() async {
   // Dashboard - Bloc
   sl.registerFactory(
     () => DashboardBloc(sl()),
+  );
+
+  // Theme - Bloc
+  sl.registerFactory(
+    () => ThemeBloc(sl()),
   );
 
   // Auth - Use Cases
@@ -169,6 +178,11 @@ Future<void> init() async {
   // Pomodoro - Data Sources
   sl.registerLazySingleton<PomodoroDataSource>(
     () => PomodoroDataSource(sl()),
+  );
+
+  // Theme - Preferences
+  sl.registerLazySingleton<ThemePreferences>(
+    () => ThemePreferences(sl()),
   );
 
   // ===== Core =====

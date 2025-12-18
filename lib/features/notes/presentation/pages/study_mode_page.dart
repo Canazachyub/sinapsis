@@ -161,51 +161,53 @@ class _StudyModePageState extends State<StudyModePage> {
 
             return Column(
               children: [
-                // Barra de progreso
+                // Barra de progreso compacta con título
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: Column(
+                  child: Row(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Nota ${_currentNoteIndex + 1} de ${state.notes.length}',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          Text(
-                            '${((_currentNoteIndex / state.notes.length) * 100).toStringAsFixed(0)}%',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                          ),
-                        ],
+                      // Progreso
+                      Text(
+                        'Nota ${_currentNoteIndex + 1} de ${state.notes.length}',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                      const SizedBox(height: 8),
-                      LinearProgressIndicator(
-                        value: (_currentNoteIndex + 1) / state.notes.length,
-                        backgroundColor: Colors.grey[300],
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: LinearProgressIndicator(
+                          value: (_currentNoteIndex + 1) / state.notes.length,
+                          backgroundColor: Colors.grey[300],
+                          minHeight: 6,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${((_currentNoteIndex / state.notes.length) * 100).toStringAsFixed(0)}%',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
                       ),
                     ],
                   ),
                 ),
 
-                // Título de la nota
+                // Título compacto
                 Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                   child: Text(
                     currentNote.title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
 
-                // Documento con oclusiones
+                // Documento con oclusiones - más espacio
                 Expanded(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     child: StudyDocumentViewer(
                       content: currentNote.content,
                       showOcclusions: _showAnswer,
@@ -213,9 +215,9 @@ class _StudyModePageState extends State<StudyModePage> {
                   ),
                 ),
 
-                // Botones de acción
+                // Botones de acción compactos
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
                     border: Border(
@@ -228,74 +230,48 @@ class _StudyModePageState extends State<StudyModePage> {
                       if (!_showAnswer) ...[
                         FilledButton.icon(
                           onPressed: () => setState(() => _showAnswer = true),
-                          icon: const Icon(Icons.visibility),
+                          icon: const Icon(Icons.visibility, size: 20),
                           label: const Text('Mostrar Respuesta'),
                           style: FilledButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 48),
+                            minimumSize: const Size(double.infinity, 40),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
                           ),
                         ),
                       ] else ...[
-                        const Text(
-                          '¿Cómo fue tu desempeño?',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
+                        // Botones de dificultad en una sola fila
                         Row(
                           children: [
-                            Expanded(
-                              child: _buildDifficultyButton(
-                                'No sabía',
-                                Colors.red,
-                                () => _markDifficulty('hard', state.notes),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _buildDifficultyButton(
-                                'Difícil',
-                                Colors.orange,
-                                () => _markDifficulty('medium', state.notes),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildDifficultyButton(
-                                'Fácil',
-                                Colors.green,
-                                () => _markDifficulty('easy', state.notes),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _buildDifficultyButton(
-                                'Dominada',
-                                Colors.blue,
-                                () => _markDifficulty('mastered', state.notes),
-                              ),
-                            ),
+                            Expanded(child: _buildDifficultyButton('❌', Colors.red, () => _markDifficulty('hard', state.notes))),
+                            const SizedBox(width: 6),
+                            Expanded(child: _buildDifficultyButton('😐', Colors.orange, () => _markDifficulty('medium', state.notes))),
+                            const SizedBox(width: 6),
+                            Expanded(child: _buildDifficultyButton('👍', Colors.green, () => _markDifficulty('easy', state.notes))),
+                            const SizedBox(width: 6),
+                            Expanded(child: _buildDifficultyButton('⭐', Colors.blue, () => _markDifficulty('mastered', state.notes))),
                           ],
                         ),
                       ],
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           TextButton.icon(
                             onPressed: _currentNoteIndex > 0 ? _previousNote : null,
-                            icon: const Icon(Icons.arrow_back),
+                            icon: const Icon(Icons.arrow_back, size: 18),
                             label: const Text('Anterior'),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              visualDensity: VisualDensity.compact,
+                            ),
                           ),
                           TextButton.icon(
                             onPressed: () => _nextNote(state.notes),
-                            icon: const Icon(Icons.arrow_forward),
+                            icon: const Icon(Icons.arrow_forward, size: 18),
                             label: const Text('Siguiente'),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              visualDensity: VisualDensity.compact,
+                            ),
                           ),
                         ],
                       ),
@@ -318,9 +294,10 @@ class _StudyModePageState extends State<StudyModePage> {
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        minimumSize: const Size(0, 36),
       ),
-      child: Text(label),
+      child: Text(label, style: const TextStyle(fontSize: 18)),
     );
   }
 }

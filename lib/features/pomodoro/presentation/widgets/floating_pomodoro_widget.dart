@@ -4,6 +4,7 @@ import '../bloc/pomodoro_bloc.dart';
 import '../../domain/entities/pomodoro_session.dart';
 
 /// Widget flotante minimalista del Pomodoro que aparece en todas las páginas
+/// MOVIBLE: El usuario puede arrastrarlo a cualquier posición
 class FloatingPomodoroWidget extends StatefulWidget {
   const FloatingPomodoroWidget({super.key});
 
@@ -14,8 +15,14 @@ class FloatingPomodoroWidget extends StatefulWidget {
 class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
   bool _isExpanded = false;
 
+  // Posición del widget (offset desde bottom-right)
+  Offset _position = const Offset(16, 80); // right, bottom
+  bool _isDragging = false;
+
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+
     return BlocBuilder<PomodoroBloc, PomodoroBlockState>(
       builder: (context, state) {
         // Solo mostrar si hay un Pomodoro activo
@@ -23,27 +30,78 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
           return const SizedBox.shrink();
         }
 
+        final widgetWidth = _isExpanded ? 280.0 : 120.0;
+        final widgetHeight = _isExpanded ? 140.0 : 80.0;
+
+        // Calcular posición real (desde bottom-right)
+        final left = screenSize.width - _position.dx - widgetWidth;
+        final top = screenSize.height - _position.dy - widgetHeight;
+
         return Positioned(
-          bottom: 80,
-          right: 16,
-          child: Material(
-            elevation: 8,
-            borderRadius: BorderRadius.circular(16),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-              width: _isExpanded ? 280 : 120,
-              decoration: BoxDecoration(
-                color: _getBackgroundColor(state),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _getBorderColor(state),
-                  width: 2,
+          left: left.clamp(0, screenSize.width - widgetWidth),
+          top: top.clamp(0, screenSize.height - widgetHeight - 56), // 56 para navbar
+          child: GestureDetector(
+            onPanStart: (_) => setState(() => _isDragging = true),
+            onPanUpdate: (details) {
+              setState(() {
+                // Actualizar posición basada en el movimiento
+                _position = Offset(
+                  (_position.dx - details.delta.dx).clamp(8, screenSize.width - widgetWidth - 8),
+                  (_position.dy - details.delta.dy).clamp(60, screenSize.height - widgetHeight - 60),
+                );
+              });
+            },
+            onPanEnd: (_) => setState(() => _isDragging = false),
+            child: Material(
+              elevation: _isDragging ? 12 : 8,
+              borderRadius: BorderRadius.circular(16),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                width: widgetWidth,
+                decoration: BoxDecoration(
+                  color: _getBackgroundColor(state),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _isDragging
+                        ? Colors.white.withOpacity(0.8)
+                        : _getBorderColor(state),
+                    width: _isDragging ? 3 : 2,
+                  ),
+                  boxShadow: _isDragging ? [
+                    BoxShadow(
+                      color: _getBackgroundColor(state).withOpacity(0.5),
+                      blurRadius: 20,
+                      spreadRadius: 2,
+                    ),
+                  ] : null,
+                ),
+                child: Stack(
+                  children: [
+                    // Indicador de arrastre
+                    if (!_isExpanded)
+                      Positioned(
+                        top: 4,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            width: 30,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.4),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Contenido
+                    _isExpanded
+                        ? _buildExpandedView(context, state)
+                        : _buildCollapsedView(context, state),
+                  ],
                 ),
               ),
-              child: _isExpanded
-                  ? _buildExpandedView(context, state)
-                  : _buildCollapsedView(context, state),
             ),
           ),
         );
@@ -69,10 +127,11 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
       onTap: () => setState(() => _isExpanded = true),
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const SizedBox(height: 4), // Espacio para la barra de arrastre
             Icon(icon, color: Colors.white, size: 24),
             const SizedBox(height: 4),
             Text(
@@ -101,79 +160,61 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
       time = state.formattedTime;
       title = state.currentState == PomodoroState.working ? 'Trabajando' : 'Descanso';
       actions = [
-        IconButton(
+        _buildActionButton(
+          icon: Icons.pause,
           onPressed: () => bloc.add(const PausePomodoro()),
-          icon: const Icon(Icons.pause, color: Colors.white),
-          tooltip: 'Pausar',
-          iconSize: 20,
         ),
-        IconButton(
+        _buildActionButton(
+          icon: Icons.stop,
           onPressed: () {
             bloc.add(const StopPomodoro());
             setState(() => _isExpanded = false);
           },
-          icon: const Icon(Icons.stop, color: Colors.white),
-          tooltip: 'Detener',
-          iconSize: 20,
         ),
       ];
     } else if (state is PomodoroPaused) {
       time = state.formattedTime;
       title = 'Pausado';
       actions = [
-        IconButton(
+        _buildActionButton(
+          icon: Icons.play_arrow,
           onPressed: () => bloc.add(const ResumePomodoro()),
-          icon: const Icon(Icons.play_arrow, color: Colors.white),
-          tooltip: 'Reanudar',
-          iconSize: 20,
         ),
-        IconButton(
+        _buildActionButton(
+          icon: Icons.stop,
           onPressed: () {
             bloc.add(const StopPomodoro());
             setState(() => _isExpanded = false);
           },
-          icon: const Icon(Icons.stop, color: Colors.white),
-          tooltip: 'Detener',
-          iconSize: 20,
         ),
       ];
     } else if (state is PomodoroCompleted) {
-      title = '¡Completado!';
+      title = '!Completado!';
       time = '00:00';
       actions = [
-        IconButton(
+        _buildActionButton(
+          icon: Icons.coffee,
           onPressed: () => bloc.add(const SkipToBreak()),
-          icon: const Icon(Icons.coffee, color: Colors.white),
-          tooltip: 'Descanso',
-          iconSize: 20,
         ),
-        IconButton(
-          onPressed: () {
-            bloc.add(const StartPomodoro());
-          },
-          icon: const Icon(Icons.replay, color: Colors.white),
-          tooltip: 'Otro',
-          iconSize: 20,
+        _buildActionButton(
+          icon: Icons.replay,
+          onPressed: () => bloc.add(const StartPomodoro()),
         ),
       ];
     } else if (state is BreakCompleted) {
-      title = '¡Listo!';
+      title = '!Listo!';
       time = '00:00';
       actions = [
-        IconButton(
+        _buildActionButton(
+          icon: Icons.play_arrow,
           onPressed: () => bloc.add(const SkipBreak()),
-          icon: const Icon(Icons.play_arrow, color: Colors.white),
-          tooltip: 'Trabajar',
-          iconSize: 20,
         ),
-        IconButton(
+        _buildActionButton(
+          icon: Icons.close,
           onPressed: () {
             bloc.add(const StopPomodoro());
             setState(() => _isExpanded = false);
           },
-          icon: const Icon(Icons.close, color: Colors.white),
-          tooltip: 'Cerrar',
-          iconSize: 20,
         ),
       ];
     }
@@ -187,6 +228,15 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // Barra de arrastre
+              Container(
+                width: 30,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
               Text(
                 title,
                 style: const TextStyle(
@@ -195,12 +245,9 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              IconButton(
-                onPressed: () => setState(() => _isExpanded = false),
-                icon: const Icon(Icons.minimize, color: Colors.white),
-                iconSize: 16,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
+              InkWell(
+                onTap: () => setState(() => _isExpanded = false),
+                child: const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 20),
               ),
             ],
           ),
@@ -222,6 +269,24 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
             children: actions,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
   }
