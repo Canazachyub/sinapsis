@@ -2229,14 +2229,12 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
 
       if (!mounted) return;
 
-      // Mostrar editor de oclusiones
-      final newOcclusions = await showDialog<List<Rect>>(
-        context: context,
-        builder: (context) => _ImageOcclusionEditDialog(
-          imagePath: imagePath,
-          aspectRatio: aspectRatio,
-          initialOcclusions: currentOcclusions,
-        ),
+      // Mostrar editor de oclusiones en pantalla completa
+      final newOcclusions = await ImageOcclusionEditor.open(
+        context,
+        imagePath: imagePath,
+        aspectRatio: aspectRatio,
+        initialOcclusions: currentOcclusions,
       );
 
       if (newOcclusions == null || !mounted) return;
@@ -2450,12 +2448,10 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
   }
 
   Future<List<Rect>?> _showOcclusionEditor(String imagePath, double aspectRatio) async {
-    return await showDialog<List<Rect>>(
-      context: context,
-      builder: (context) => _ImageOcclusionDialog(
-        imagePath: imagePath,
-        aspectRatio: aspectRatio,
-      ),
+    return await ImageOcclusionEditor.open(
+      context,
+      imagePath: imagePath,
+      aspectRatio: aspectRatio,
     );
   }
 
@@ -2559,8 +2555,31 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
                             showColorButton: true,
                             showDirection: false,
                             showDividers: true,
-                            showFontFamily: false,
-                            showFontSize: false,
+                            // Fuentes habilitadas
+                            showFontFamily: true,
+                            fontFamilyValues: const {
+                              'Sans Serif': 'sans-serif',
+                              'Serif': 'serif',
+                              'Monospace': 'monospace',
+                              'Roboto': 'Roboto',
+                              'Open Sans': 'Open Sans',
+                              'Lato': 'Lato',
+                              'Georgia': 'Georgia',
+                              'Courier': 'Courier New',
+                            },
+                            // Tamaños de fuente habilitados
+                            showFontSize: true,
+                            fontSizesValues: const {
+                              'Pequeño': '10',
+                              'Normal': '14',
+                              'Mediano': '16',
+                              'Grande': '18',
+                              'Muy grande': '22',
+                              'Título': '28',
+                              'Encabezado': '36',
+                            },
+                            // Interlineado habilitado
+                            showLineHeightButton: true,
                             showHeaderStyle: true,
                             showIndent: true,
                             showInlineCode: true,
@@ -2577,8 +2596,8 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
                             showSearchButton: false,
                             showSmallButton: false,
                             showStrikeThrough: true,
-                            showSubscript: false,
-                            showSuperscript: false,
+                            showSubscript: true,
+                            showSuperscript: true,
                             showUnderLineButton: true,
                             showUndo: true,
                           ),
@@ -2833,185 +2852,6 @@ class DocumentViewer extends StatelessWidget {
           LatexEmbedBuilder(),
           TableEmbedBuilder(),
         ],
-      ),
-    );
-  }
-}
-
-/// Diálogo para editar oclusiones de imagen
-class _ImageOcclusionDialog extends StatefulWidget {
-  final String imagePath;
-  final double aspectRatio;
-
-  const _ImageOcclusionDialog({
-    required this.imagePath,
-    required this.aspectRatio,
-  });
-
-  @override
-  State<_ImageOcclusionDialog> createState() => _ImageOcclusionDialogState();
-}
-
-class _ImageOcclusionDialogState extends State<_ImageOcclusionDialog> {
-  List<Rect> _occlusions = [];
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      child: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.8,
-        height: MediaQuery.of(context).size.height * 0.8,
-        child: Column(
-          children: [
-            // Título
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  const Icon(Icons.visibility_off),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Marcar oclusiones en la imagen',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            // Editor de oclusiones
-            Expanded(
-              child: ImageOcclusionEditor(
-                imagePath: widget.imagePath,
-                aspectRatio: widget.aspectRatio,
-                onOcclusionsChanged: (occlusions) {
-                  _occlusions = occlusions;
-                },
-              ),
-            ),
-            const Divider(height: 1),
-            // Botones de acción
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context, _occlusions),
-                    child: const Text('Guardar'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Diálogo para editar oclusiones existentes de una imagen
-class _ImageOcclusionEditDialog extends StatefulWidget {
-  final String imagePath;
-  final double aspectRatio;
-  final List<Rect> initialOcclusions;
-
-  const _ImageOcclusionEditDialog({
-    required this.imagePath,
-    required this.aspectRatio,
-    required this.initialOcclusions,
-  });
-
-  @override
-  State<_ImageOcclusionEditDialog> createState() => _ImageOcclusionEditDialogState();
-}
-
-class _ImageOcclusionEditDialogState extends State<_ImageOcclusionEditDialog> {
-  List<Rect> _occlusions = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _occlusions = List.from(widget.initialOcclusions);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      child: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.8,
-        height: MediaQuery.of(context).size.height * 0.8,
-        child: Column(
-          children: [
-            // Título
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  const Icon(Icons.edit_note),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Editar oclusiones de la imagen',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            // Editor de oclusiones
-            Expanded(
-              child: ImageOcclusionEditor(
-                imagePath: widget.imagePath,
-                aspectRatio: widget.aspectRatio,
-                initialOcclusions: _occlusions,
-                onOcclusionsChanged: (occlusions) {
-                  _occlusions = occlusions;
-                },
-              ),
-            ),
-            const Divider(height: 1),
-            // Botones de acción
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context, _occlusions),
-                    child: const Text('Guardar cambios'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

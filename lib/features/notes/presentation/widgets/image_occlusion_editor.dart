@@ -1,22 +1,38 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:sinapsis/core/constants/image_constants.dart';
 
-/// Editor para marcar oclusiones en imágenes
-/// Permite dibujar rectángulos sobre partes de la imagen que se ocultarán en modo estudio
+/// Editor de pantalla completa para marcar oclusiones en imágenes
+/// Con soporte de ZOOM para mayor precisión
 class ImageOcclusionEditor extends StatefulWidget {
   final String imagePath;
   final double aspectRatio;
   final List<Rect> initialOcclusions;
-  final ValueChanged<List<Rect>> onOcclusionsChanged;
 
   const ImageOcclusionEditor({
     super.key,
     required this.imagePath,
     required this.aspectRatio,
     this.initialOcclusions = const [],
-    required this.onOcclusionsChanged,
   });
+
+  /// Abre el editor en pantalla completa y retorna las oclusiones
+  static Future<List<Rect>?> open(
+    BuildContext context, {
+    required String imagePath,
+    required double aspectRatio,
+    List<Rect> initialOcclusions = const [],
+  }) {
+    return Navigator.of(context).push<List<Rect>>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => ImageOcclusionEditor(
+          imagePath: imagePath,
+          aspectRatio: aspectRatio,
+          initialOcclusions: initialOcclusions,
+        ),
+      ),
+    );
+  }
 
   @override
   State<ImageOcclusionEditor> createState() => _ImageOcclusionEditorState();
@@ -24,209 +40,465 @@ class ImageOcclusionEditor extends StatefulWidget {
 
 class _ImageOcclusionEditorState extends State<ImageOcclusionEditor> {
   final List<Rect> _occlusions = [];
+
+  // Control de zoom
+  final TransformationController _transformController = TransformationController();
+  double _currentScale = 1.0;
+
+  // Estado de dibujo
   Offset? _dragStart;
   Offset? _dragCurrent;
+  bool _isDrawing = false;
 
-  // GlobalKey para obtener el tamaño real del widget renderizado
-  final GlobalKey _imageKey = GlobalKey();
+  // Modo: true = dibujar oclusiones, false = navegar/pan
+  bool _isDrawMode = true;
 
-  // Tamaño fijo para la imagen basado en constantes
-  late final Size _imageSize;
+  // Key para obtener el tamaño del contenedor
+  final GlobalKey _containerKey = GlobalKey();
+
+  // Tamaño de la imagen cargada
+  Size? _imageSize;
 
   @override
   void initState() {
     super.initState();
     _occlusions.addAll(widget.initialOcclusions);
-
-    // Calcular tamaño fijo de la imagen basado en constantes
-    _imageSize = Size(
-      ImageConstants.occlusionImageWidth,
-      ImageConstants.calculateHeight(widget.aspectRatio),
-    );
+    _transformController.addListener(_onTransformChanged);
   }
 
-  // Obtener el tamaño REAL del widget renderizado
-  Size? _getRenderBoxSize() {
-    final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
-    return renderBox?.size;
+  @override
+  void dispose() {
+    _transformController.removeListener(_onTransformChanged);
+    _transformController.dispose();
+    super.dispose();
+  }
+
+  void _onTransformChanged() {
+    final scale = _transformController.value.getMaxScaleOnAxis();
+    if (scale != _currentScale) {
+      setState(() {
+        _currentScale = scale;
+      });
+    }
   }
 
   void _onPanStart(DragStartDetails details) {
-    setState(() {
-      _dragStart = details.localPosition;
-      _dragCurrent = details.localPosition;
-    });
+    if (_imageSize == null) return;
+
+    // localPosition ya está en coordenadas del widget (Flutter hace la transformación inversa)
+    final canvasPos = details.localPosition;
+
+    // Verificar que está dentro de los límites de la imagen
+    if (canvasPos.dx >= 0 && canvasPos.dx <= _imageSize!.width &&
+        canvasPos.dy >= 0 && canvasPos.dy <= _imageSize!.height) {
+      setState(() {
+        _isDrawing = true;
+        _dragStart = canvasPos;
+        _dragCurrent = canvasPos;
+      });
+    }
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
+    if (!_isDrawing || _imageSize == null) return;
+
+    // localPosition ya está en coordenadas del widget
+    final canvasPos = details.localPosition;
+
+    // Limitar a los bordes de la imagen
+    final clampedPos = Offset(
+      canvasPos.dx.clamp(0, _imageSize!.width),
+      canvasPos.dy.clamp(0, _imageSize!.height),
+    );
+
     setState(() {
-      _dragCurrent = details.localPosition;
+      _dragCurrent = clampedPos;
     });
   }
 
   void _onPanEnd(DragEndDetails details) {
-    if (_dragStart != null && _dragCurrent != null) {
-      // Obtener el tamaño REAL del widget renderizado para normalizar correctamente
-      final actualSize = _getRenderBoxSize() ?? _imageSize;
-
-      // Crear rectángulo desde la posición de inicio a la actual
-      final left = _dragStart!.dx < _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx;
-      final top = _dragStart!.dy < _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy;
-      final right = _dragStart!.dx > _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx;
-      final bottom = _dragStart!.dy > _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy;
-
-      // Normalizar coordenadas relativas al tamaño REAL renderizado (0-1)
-      final normalizedRect = Rect.fromLTRB(
-        left / actualSize.width,
-        top / actualSize.height,
-        right / actualSize.width,
-        bottom / actualSize.height,
-      );
-
+    if (!_isDrawing || _dragStart == null || _dragCurrent == null || _imageSize == null) {
       setState(() {
-        _occlusions.add(normalizedRect);
+        _isDrawing = false;
         _dragStart = null;
         _dragCurrent = null;
       });
-
-      widget.onOcclusionsChanged(_occlusions);
+      return;
     }
+
+    // Crear rectángulo normalizado (0-1)
+    final left = (_dragStart!.dx < _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx) / _imageSize!.width;
+    final top = (_dragStart!.dy < _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy) / _imageSize!.height;
+    final right = (_dragStart!.dx > _dragCurrent!.dx ? _dragStart!.dx : _dragCurrent!.dx) / _imageSize!.width;
+    final bottom = (_dragStart!.dy > _dragCurrent!.dy ? _dragStart!.dy : _dragCurrent!.dy) / _imageSize!.height;
+
+    // Solo agregar si tiene tamaño mínimo
+    if ((right - left) > 0.01 && (bottom - top) > 0.01) {
+      setState(() {
+        _occlusions.add(Rect.fromLTRB(left, top, right, bottom));
+      });
+    }
+
+    setState(() {
+      _isDrawing = false;
+      _dragStart = null;
+      _dragCurrent = null;
+    });
   }
 
-  void _removeLastOcclusion() {
+  void _zoomIn() {
+    final currentScale = _transformController.value.getMaxScaleOnAxis();
+    final newScale = (currentScale * 1.5).clamp(0.5, 5.0);
+    _setScale(newScale);
+  }
+
+  void _zoomOut() {
+    final currentScale = _transformController.value.getMaxScaleOnAxis();
+    final newScale = (currentScale / 1.5).clamp(0.5, 5.0);
+    _setScale(newScale);
+  }
+
+  void _resetZoom() {
+    _transformController.value = Matrix4.identity();
+  }
+
+  void _setScale(double scale) {
+    // Obtener el centro actual
+    final renderBox = _containerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+
+    final center = renderBox.size.center(Offset.zero);
+
+    // Crear nueva transformación centrada
+    final matrix = Matrix4.identity()
+      ..translate(center.dx, center.dy)
+      ..scale(scale)
+      ..translate(-center.dx, -center.dy);
+
+    _transformController.value = matrix;
+  }
+
+  void _undoLast() {
     if (_occlusions.isNotEmpty) {
       setState(() {
         _occlusions.removeLast();
       });
-      widget.onOcclusionsChanged(_occlusions);
     }
   }
 
-  void _clearAllOcclusions() {
-    setState(() {
-      _occlusions.clear();
-    });
-    widget.onOcclusionsChanged(_occlusions);
+  void _clearAll() {
+    if (_occlusions.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Limpiar todo'),
+        content: const Text('¿Eliminar todas las oclusiones?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              setState(() => _occlusions.clear());
+              Navigator.pop(ctx);
+            },
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _save() {
+    Navigator.of(context).pop(_occlusions);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Barra de herramientas
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            border: Border(
-              bottom: BorderSide(
-                color: Theme.of(context).dividerColor,
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black87,
+        foregroundColor: Colors.white,
+        title: const Text('Editor de Oclusiones'),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(null),
+        ),
+        actions: [
+          // Contador de oclusiones
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: Colors.orange.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              '${_occlusions.length} oclusiones',
+              style: const TextStyle(
+                color: Colors.orange,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ),
-          child: Row(
-            children: [
-              const Icon(Icons.info_outline, size: 20),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Arrastra para dibujar rectángulos sobre las partes que deseas ocultar',
-                  style: TextStyle(fontSize: 13),
-                ),
-              ),
-              Text(
-                '${_occlusions.length} oclusiones',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.undo),
-                onPressed: _occlusions.isEmpty ? null : _removeLastOcclusion,
-                tooltip: 'Deshacer última oclusión',
-              ),
-              IconButton(
-                icon: const Icon(Icons.clear_all),
-                onPressed: _occlusions.isEmpty ? null : _clearAllOcclusions,
-                tooltip: 'Limpiar todas las oclusiones',
-              ),
-            ],
+          IconButton(
+            icon: const Icon(Icons.check),
+            onPressed: _save,
+            tooltip: 'Guardar',
           ),
-        ),
-        // Área de imagen con overlay de oclusiones - CON SCROLL para imágenes altas
-        Expanded(
-          child: SingleChildScrollView(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(ImageConstants.imageCenterPadding),
-                child: SizedBox(
-                  width: _imageSize.width,
-                  height: _imageSize.height,
-                  child: GestureDetector(
-                    onPanStart: _onPanStart,
-                    onPanUpdate: _onPanUpdate,
-                    onPanEnd: _onPanEnd,
+        ],
+      ),
+      body: Column(
+        children: [
+          // Barra de herramientas
+          _buildToolbar(),
+
+          // Área de edición con zoom
+          Expanded(
+            child: Container(
+              key: _containerKey,
+              color: Colors.grey[900],
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Calcular tamaño de imagen que llene el espacio disponible
+                  final availableWidth = constraints.maxWidth;
+                  final availableHeight = constraints.maxHeight;
+
+                  double imageWidth, imageHeight;
+
+                  if (availableWidth / availableHeight > widget.aspectRatio) {
+                    // Limitado por altura
+                    imageHeight = availableHeight;
+                    imageWidth = imageHeight * widget.aspectRatio;
+                  } else {
+                    // Limitado por ancho
+                    imageWidth = availableWidth;
+                    imageHeight = imageWidth / widget.aspectRatio;
+                  }
+
+                  // Guardar tamaño de imagen
+                  _imageSize = Size(imageWidth, imageHeight);
+
+                  // Widget de contenido (imagen + oclusiones)
+                  final contentWidget = SizedBox(
+                    width: imageWidth,
+                    height: imageHeight,
                     child: Stack(
-                      key: _imageKey,  // Agregar key para obtener tamaño real
                       children: [
-                        // Imagen con tamaño fijo
+                        // Imagen
                         Image.file(
                           File(widget.imagePath),
-                          width: _imageSize.width,
-                          height: _imageSize.height,
+                          width: imageWidth,
+                          height: imageHeight,
                           fit: BoxFit.fill,
                         ),
-                        // Overlay de oclusiones - con SizedBox para forzar tamaño exacto
-                        SizedBox(
-                          width: _imageSize.width,
-                          height: _imageSize.height,
-                          child: CustomPaint(
-                            painter: _OcclusionPainter(
-                              occlusions: _occlusions,
-                              imageSize: _imageSize,
-                              dragStart: _dragStart,
-                              dragCurrent: _dragCurrent,
-                            ),
+
+                        // Canvas de oclusiones
+                        CustomPaint(
+                          size: Size(imageWidth, imageHeight),
+                          painter: _OcclusionPainter(
+                            occlusions: _occlusions,
+                            imageSize: Size(imageWidth, imageHeight),
+                            dragStart: _dragStart,
+                            dragCurrent: _dragCurrent,
+                            isDrawing: _isDrawing,
                           ),
                         ),
                       ],
                     ),
-                  ),
-                ),
+                  );
+
+                  return Center(
+                    child: InteractiveViewer(
+                      transformationController: _transformController,
+                      minScale: 0.5,
+                      maxScale: 5.0,
+                      // Pan habilitado solo en modo navegar O cuando no está dibujando
+                      panEnabled: !_isDrawMode || !_isDrawing,
+                      scaleEnabled: true, // Zoom siempre disponible
+                      child: _isDrawMode
+                          // Modo dibujar: GestureDetector activo
+                          ? GestureDetector(
+                              onPanStart: _onPanStart,
+                              onPanUpdate: _onPanUpdate,
+                              onPanEnd: _onPanEnd,
+                              child: contentWidget,
+                            )
+                          // Modo navegar: sin GestureDetector
+                          : contentWidget,
+                    ),
+                  );
+                },
               ),
             ),
           ),
-        ),
-      ],
+
+          // Instrucciones dinámicas según el modo
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: _isDrawMode ? Colors.orange.withOpacity(0.2) : Colors.blue.withOpacity(0.2),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _isDrawMode ? Icons.edit : Icons.pan_tool,
+                  color: _isDrawMode ? Colors.orange : Colors.blue,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _isDrawMode
+                      ? 'Modo DIBUJAR: Arrastra para crear oclusiones • Pellizca para zoom'
+                      : 'Modo NAVEGAR: Arrastra para mover • Pellizca para zoom',
+                  style: TextStyle(
+                    color: _isDrawMode ? Colors.orange[300] : Colors.blue[300],
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolbar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: Colors.black87,
+      child: Row(
+        children: [
+          // Controles de zoom
+          IconButton(
+            icon: const Icon(Icons.zoom_out, color: Colors.white),
+            onPressed: _zoomOut,
+            tooltip: 'Alejar',
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '${(_currentScale * 100).toInt()}%',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.zoom_in, color: Colors.white),
+            onPressed: _zoomIn,
+            tooltip: 'Acercar',
+          ),
+          IconButton(
+            icon: const Icon(Icons.fit_screen, color: Colors.white),
+            onPressed: _resetZoom,
+            tooltip: 'Restablecer zoom',
+          ),
+
+          const SizedBox(width: 16),
+
+          // Toggle modo dibujar/navegar
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Botón Navegar
+                Tooltip(
+                  message: 'Modo navegar (arrastrar para mover)',
+                  child: InkWell(
+                    onTap: () => setState(() => _isDrawMode = false),
+                    borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: !_isDrawMode ? Colors.blue : Colors.transparent,
+                        borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
+                      ),
+                      child: Icon(
+                        Icons.pan_tool,
+                        color: !_isDrawMode ? Colors.white : Colors.white70,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+                // Botón Dibujar
+                Tooltip(
+                  message: 'Modo dibujar (arrastrar para crear oclusión)',
+                  child: InkWell(
+                    onTap: () => setState(() => _isDrawMode = true),
+                    borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _isDrawMode ? Colors.orange : Colors.transparent,
+                        borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
+                      ),
+                      child: Icon(
+                        Icons.edit,
+                        color: _isDrawMode ? Colors.white : Colors.white70,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const Spacer(),
+
+          // Controles de edición
+          IconButton(
+            icon: const Icon(Icons.undo, color: Colors.white),
+            onPressed: _occlusions.isEmpty ? null : _undoLast,
+            tooltip: 'Deshacer',
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep, color: Colors.white),
+            onPressed: _occlusions.isEmpty ? null : _clearAll,
+            tooltip: 'Limpiar todo',
+          ),
+        ],
+      ),
     );
   }
 }
 
-/// Painter para dibujar rectángulos de oclusión sobre la imagen
+/// Painter para dibujar rectángulos de oclusión
 class _OcclusionPainter extends CustomPainter {
   final List<Rect> occlusions;
   final Size imageSize;
   final Offset? dragStart;
   final Offset? dragCurrent;
+  final bool isDrawing;
 
   _OcclusionPainter({
     required this.occlusions,
     required this.imageSize,
     this.dragStart,
     this.dragCurrent,
+    this.isDrawing = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    // LOG: Información del canvas
-    print('✏️ EDITOR - CustomPaint size: $size');
-    print('✏️ EDITOR - imageSize: $imageSize');
-
-    // Pintar oclusiones guardadas
-    final paint = Paint()
+    // Paint para oclusiones guardadas
+    final fillPaint = Paint()
       ..color = Colors.orange.withOpacity(0.5)
       ..style = PaintingStyle.fill;
 
@@ -235,33 +507,52 @@ class _OcclusionPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
-    // CRÍTICO: Usar el tamaño REAL del canvas (size) en lugar del calculado (imageSize)
-    // para evitar desplazamiento en imágenes altas
-    final actualSize = size;
+    // Dibujar oclusiones guardadas
+    for (int i = 0; i < occlusions.length; i++) {
+      final normalizedRect = occlusions[i];
 
-    int index = 0;
-    for (final normalizedRect in occlusions) {
-      // Convertir coordenadas normalizadas a píxeles usando el tamaño REAL del canvas
+      // Convertir coordenadas normalizadas a píxeles
       final rect = Rect.fromLTRB(
-        normalizedRect.left * actualSize.width,
-        normalizedRect.top * actualSize.height,
-        normalizedRect.right * actualSize.width,
-        normalizedRect.bottom * actualSize.height,
+        normalizedRect.left * size.width,
+        normalizedRect.top * size.height,
+        normalizedRect.right * size.width,
+        normalizedRect.bottom * size.height,
       );
 
-      // LOG: Coordenadas de cada oclusión
-      print('📍 EDITOR Oclusión $index:');
-      print('   Normalizada: L:${normalizedRect.left.toStringAsFixed(3)} T:${normalizedRect.top.toStringAsFixed(3)} R:${normalizedRect.right.toStringAsFixed(3)} B:${normalizedRect.bottom.toStringAsFixed(3)}');
-      print('   Absoluta (usando actualSize): L:${rect.left.toStringAsFixed(1)} T:${rect.top.toStringAsFixed(1)} R:${rect.right.toStringAsFixed(1)} B:${rect.bottom.toStringAsFixed(1)}');
-      index++;
-
-      canvas.drawRect(rect, paint);
+      canvas.drawRect(rect, fillPaint);
       canvas.drawRect(rect, borderPaint);
+
+      // Número de oclusión
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: '${i + 1}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+
+      // Fondo del número
+      final numberRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          rect.left + 4,
+          rect.top + 4,
+          textPainter.width + 8,
+          textPainter.height + 4,
+        ),
+        const Radius.circular(4),
+      );
+      canvas.drawRRect(numberRect, Paint()..color = Colors.orange);
+      textPainter.paint(canvas, Offset(rect.left + 8, rect.top + 6));
     }
 
-    // Pintar rectángulo en proceso de dibujo
-    if (dragStart != null && dragCurrent != null) {
-      final currentPaint = Paint()
+    // Dibujar rectángulo en proceso
+    if (isDrawing && dragStart != null && dragCurrent != null) {
+      final currentFillPaint = Paint()
         ..color = Colors.blue.withOpacity(0.3)
         ..style = PaintingStyle.fill;
 
@@ -277,7 +568,7 @@ class _OcclusionPainter extends CustomPainter {
       final bottom = dragStart!.dy > dragCurrent!.dy ? dragStart!.dy : dragCurrent!.dy;
 
       final rect = Rect.fromLTRB(left, top, right, bottom);
-      canvas.drawRect(rect, currentPaint);
+      canvas.drawRect(rect, currentFillPaint);
       canvas.drawRect(rect, currentBorderPaint);
     }
   }
@@ -286,6 +577,7 @@ class _OcclusionPainter extends CustomPainter {
   bool shouldRepaint(_OcclusionPainter oldDelegate) {
     return occlusions != oldDelegate.occlusions ||
         dragStart != oldDelegate.dragStart ||
-        dragCurrent != oldDelegate.dragCurrent;
+        dragCurrent != oldDelegate.dragCurrent ||
+        isDrawing != oldDelegate.isDrawing;
   }
 }
