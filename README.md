@@ -2,162 +2,717 @@
 
 **Sistema Integral de Estudio y Repaso Activo**
 
-Aplicación multiplataforma de estudio con sistema de repetición espaciada (SRS), Pomodoro Timer y gestión completa de cursos y notas.
+Aplicación multiplataforma de estudio con flashcards, oclusiones de imagen, editor de texto enriquecido, sistema de repetición espaciada (SRS) y temporizador Pomodoro.
+
+---
+
+## Tabla de Contenidos
+
+1. [Características Principales](#características-principales)
+2. [Tecnologías](#tecnologías)
+3. [Arquitectura del Proyecto](#arquitectura-del-proyecto)
+4. [Estructura de Carpetas](#estructura-de-carpetas)
+5. [Base de Datos](#base-de-datos)
+6. [Features Detalladas](#features-detalladas)
+7. [Editor de Texto Enriquecido](#editor-de-texto-enriquecido)
+8. [Sistema de Oclusiones](#sistema-de-oclusiones)
+9. [Sistema SRS](#sistema-srs-spaced-repetition-system)
+10. [Pomodoro Timer](#pomodoro-timer)
+11. [Instalación y Desarrollo](#instalación-y-desarrollo)
+12. [Compilación](#compilación)
+13. [Guía de Modificación](#guía-de-modificación)
+
+---
 
 ## Características Principales
 
-- **Sistema de Repetición Espaciada (SRS):** Algoritmo SM-2 (mismo que Anki) para optimizar el aprendizaje
-- **Pomodoro Timer:** Temporizador flotante integrado con seguimiento de sesiones de estudio
-- **Gestión de Cursos y Notas:** Organiza tu contenido de estudio
-- **Editor Rico:** Soporte para Markdown, código con sintaxis highlighting
-- **Estadísticas en Tiempo Real:** Visualiza tu progreso de estudio
-- **Multiplataforma:** Windows, Linux, Android (próximamente iOS y Web)
-- **Sincronización:** Backend con Supabase para acceso desde múltiples dispositivos
+| Característica | Descripción |
+|----------------|-------------|
+| **Editor Rico** | Editor de texto con fuentes, tamaños, colores, alineación, listas, código, LaTeX |
+| **Oclusiones de Imagen** | Marca zonas en imágenes para ocultar durante el estudio |
+| **Oclusiones de Texto** | Oculta partes del texto para crear tests de tipo cloze |
+| **Oclusiones de Tablas** | Oculta celdas específicas de tablas |
+| **Oclusiones LaTeX** | Oculta partes de fórmulas matemáticas |
+| **Sistema SRS** | Algoritmo SM-2 (igual que Anki) para optimizar el repaso |
+| **Pomodoro Timer** | Temporizador flotante y arrastrable |
+| **Gestión de Cursos** | Organiza notas por cursos con colores personalizados |
+| **Modo Offline** | Funciona sin conexión con base de datos local SQLite |
+| **Sincronización** | Opcional con Supabase para múltiples dispositivos |
+| **Multiplataforma** | Windows, Linux, Android |
+
+---
 
 ## Tecnologías
 
-- **Flutter 3.27.1** - Framework multiplataforma
-- **BLoC Pattern** - Gestión de estado
-- **Drift** - Base de datos SQLite local
-- **Supabase** - Backend y sincronización
-- **SM-2 Algorithm** - Sistema de repetición espaciada
-
-## Inicio Rápido
-
-### Windows
-
-Para compilar en Windows, consulta [QUICK_START_WINDOWS.md](QUICK_START_WINDOWS.md)
-
-**Opción rápida con GitHub Actions:**
-```bash
-git push origin main
-# La compilación se hace automáticamente
-# Descarga el .exe desde la pestaña "Actions"
+```yaml
+Framework:        Flutter 3.27.1+
+Lenguaje:         Dart 3.5.0+
+Estado:           flutter_bloc (BLoC Pattern)
+Base de Datos:    Drift (SQLite)
+Backend:          Supabase (opcional)
+Editor:           flutter_quill
+Inyección:        get_it + injectable
 ```
 
-### Linux
+### Dependencias Principales
+
+| Paquete | Uso |
+|---------|-----|
+| `flutter_bloc` | Gestión de estado con patrón BLoC |
+| `drift` | ORM para SQLite |
+| `flutter_quill` | Editor de texto enriquecido |
+| `supabase_flutter` | Backend y autenticación |
+| `get_it` | Inyección de dependencias |
+| `cached_network_image` | Caché de imágenes |
+| `image_picker` | Selección de imágenes |
+| `flutter_markdown` | Renderizado de Markdown |
+
+---
+
+## Arquitectura del Proyecto
+
+El proyecto sigue **Clean Architecture** con el patrón **BLoC** para la gestión de estado.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      PRESENTATION LAYER                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │   Pages     │  │   Widgets   │  │         BLoCs           │ │
+│  │  (Screens)  │  │ (Components)│  │ (State Management)      │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                        DOMAIN LAYER                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │  Entities   │  │  Use Cases  │  │  Repository Interfaces  │ │
+│  │  (Models)   │  │  (Business) │  │      (Contracts)        │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                         DATA LAYER                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │   Models    │  │Repositories │  │      DataSources        │ │
+│  │   (DTOs)    │  │  (Impl)     │  │  (Local/Remote)         │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Flujo de Datos
+
+```
+UI Event → BLoC → UseCase → Repository → DataSource → Database/API
+                                    ↓
+UI Update ← BLoC ← Entity ← Repository ← Model ←──────┘
+```
+
+---
+
+## Estructura de Carpetas
+
+```
+lib/
+├── main.dart                    # Entry point
+├── app.dart                     # MaterialApp configuration
+├── injection_container.dart     # Dependency injection setup
+│
+├── core/                        # Servicios y utilidades compartidas
+│   ├── constants/              # Constantes de la app
+│   ├── database/               # Configuración Drift (SQLite)
+│   │   ├── database.dart       # Definición de tablas
+│   │   └── database.g.dart     # Código generado
+│   ├── errors/                 # Manejo de errores
+│   ├── network/                # Cliente HTTP (Dio)
+│   ├── services/               # Servicios globales
+│   │   ├── srs_service.dart    # Algoritmo SM-2
+│   │   └── srs_config_service.dart # Configuración SRS
+│   ├── theme/                  # Temas (light/dark)
+│   └── utils/                  # Utilidades generales
+│
+├── features/                    # Módulos de la aplicación
+│   ├── auth/                   # Autenticación
+│   │   ├── data/
+│   │   │   ├── datasources/   # AuthRemoteDataSource
+│   │   │   ├── models/        # UserModel
+│   │   │   └── repositories/  # AuthRepositoryImpl
+│   │   ├── domain/
+│   │   │   ├── entities/      # User
+│   │   │   ├── repositories/  # AuthRepository (interface)
+│   │   │   └── usecases/      # Login, Register, Logout
+│   │   └── presentation/
+│   │       ├── bloc/          # AuthBloc, AuthEvent, AuthState
+│   │       ├── pages/         # LoginPage, RegisterPage
+│   │       └── widgets/       # Componentes de auth
+│   │
+│   ├── courses/                # Gestión de cursos
+│   │   ├── data/
+│   │   ├── domain/
+│   │   │   └── entities/      # Course
+│   │   └── presentation/
+│   │       ├── bloc/          # CoursesBloc
+│   │       └── pages/         # CoursesPage
+│   │
+│   ├── notes/                  # Notas y contenido de estudio
+│   │   ├── data/
+│   │   ├── domain/
+│   │   │   └── entities/      # Note, OcclusionMark, ImageOcclusion
+│   │   └── presentation/
+│   │       ├── bloc/          # NotesBloc
+│   │       ├── pages/         # NotesPage, NoteEditorPage
+│   │       └── widgets/       # *** WIDGETS PRINCIPALES ***
+│   │           ├── rich_document_editor.dart      # Editor principal
+│   │           ├── study_document_viewer.dart     # Visor de estudio
+│   │           ├── image_occlusion_editor.dart    # Editor oclusiones imagen
+│   │           ├── image_fullscreen_viewer.dart   # Visor pantalla completa
+│   │           ├── latex_occlusion_editor.dart    # Editor oclusiones LaTeX
+│   │           ├── table_occlusion_editor.dart    # Editor oclusiones tabla
+│   │           ├── image_annotation_editor.dart   # Anotaciones en imagen
+│   │           └── annotations_painter.dart       # Painter de anotaciones
+│   │
+│   ├── pomodoro/               # Temporizador Pomodoro
+│   │   ├── data/
+│   │   ├── domain/
+│   │   │   └── entities/      # PomodoroSession
+│   │   └── presentation/
+│   │       ├── bloc/          # PomodoroBloc
+│   │       └── widgets/       # FloatingPomodoroWidget
+│   │
+│   ├── dashboard/              # Panel de estadísticas
+│   │   └── presentation/
+│   │       ├── bloc/          # DashboardBloc
+│   │       └── pages/         # DashboardPage
+│   │
+│   └── theme/                  # Gestión de tema
+│       └── presentation/
+│           └── bloc/          # ThemeBloc
+```
+
+---
+
+## Base de Datos
+
+### Esquema SQLite (Drift)
+
+```sql
+-- Usuarios
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  name TEXT,
+  avatar_url TEXT,
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- Cursos
+CREATE TABLE courses (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  color TEXT DEFAULT '#6366F1',
+  is_favorite BOOLEAN DEFAULT FALSE,
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- Notas (con campos SRS)
+CREATE TABLE notes (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,              -- flashcard, cloze, image_occlusion, etc.
+  front_content TEXT NOT NULL,     -- Contenido Delta JSON (flutter_quill)
+  back_content TEXT,
+  tags TEXT,                       -- JSON array
+  difficulty INTEGER DEFAULT 0,
+  last_reviewed DATETIME,
+  next_review DATETIME,
+  review_count INTEGER DEFAULT 0,
+  -- Campos SRS (SM-2)
+  interval INTEGER DEFAULT 0,      -- Días hasta próximo repaso
+  ease_factor REAL DEFAULT 2.5,    -- Factor de facilidad
+  consecutive_correct INTEGER DEFAULT 0,
+  srs_state TEXT DEFAULT 'new',    -- new, learning, review, relearning
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- Sesiones de estudio
+CREATE TABLE study_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  cards_reviewed INTEGER,
+  cards_correct INTEGER,
+  duration_seconds INTEGER,
+  session_type TEXT DEFAULT 'review',
+  note_id TEXT,
+  started_at DATETIME,
+  ended_at DATETIME
+);
+
+-- Sesiones Pomodoro
+CREATE TABLE pomodoro_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  course_id TEXT,
+  note_id TEXT,
+  work_duration INTEGER DEFAULT 1500,   -- 25 min
+  break_duration INTEGER DEFAULT 300,   -- 5 min
+  is_completed BOOLEAN DEFAULT FALSE,
+  was_interrupted BOOLEAN DEFAULT FALSE,
+  started_at DATETIME,
+  completed_at DATETIME
+);
+```
+
+---
+
+## Features Detalladas
+
+### 1. Editor de Texto Enriquecido
+
+**Archivo principal:** `lib/features/notes/presentation/widgets/rich_document_editor.dart`
+
+#### Toolbar - Fila 1 (QuillToolbar)
+| Herramienta | Descripción |
+|-------------|-------------|
+| **Selector de Fuente** | Sans Serif, Serif, Monospace, Roboto, Open Sans, Lato, Georgia, Courier |
+| **Selector de Tamaño** | Pequeño (10), Normal (14), Mediano (16), Grande (18), Muy grande (22), Título (28), Encabezado (36) |
+| **Negrita/Cursiva/Subrayado** | Formato básico de texto |
+| **Tachado** | Texto tachado |
+| **Color de texto** | Selector de color |
+| **Color de fondo** | Resaltado de texto |
+| **Alineación** | Izquierda, Centro, Derecha, Justificado |
+| **Interlineado** | Espaciado entre líneas |
+| **Listas** | Viñetas, Numeradas, Checkbox |
+| **Citas** | Bloques de cita |
+| **Código** | Inline y bloques de código |
+| **Links** | Hipervínculos |
+| **Deshacer/Rehacer** | Historial de cambios |
+
+#### Toolbar - Fila 2 (Botones Personalizados)
+| Herramienta | Descripción |
+|-------------|-------------|
+| **Superíndice/Subíndice** | x² y x₂ |
+| **MAYÚSCULAS/minúsculas/Capitalizar** | Transformación de texto |
+| **Oclusión de texto** | Marca texto para ocultar en estudio |
+| **Insertar imagen** | Con opción de oclusiones |
+| **Insertar LaTeX** | Fórmulas matemáticas |
+| **Insertar tabla** | Tablas con oclusiones |
+| **Pegar Markdown** | Importar desde clipboard |
+| **Editar oclusiones** | Modificar oclusiones existentes |
+
+#### Configuración del Editor
+
+```dart
+// Ubicación: rich_document_editor.dart línea ~2545
+quill.QuillToolbar.simple(
+  configurations: quill.QuillSimpleToolbarConfigurations(
+    controller: _controller,
+    showFontFamily: true,
+    fontFamilyValues: const {
+      'Sans Serif': 'sans-serif',
+      'Serif': 'serif',
+      // ...
+    },
+    showFontSize: true,
+    fontSizesValues: const {
+      'Pequeño': '10',
+      'Normal': '14',
+      // ...
+    },
+    showLineHeightButton: true,
+    // ... más configuración
+  ),
+),
+```
+
+---
+
+### 2. Sistema de Oclusiones
+
+#### Oclusiones de Imagen
+
+**Archivo:** `lib/features/notes/presentation/widgets/image_occlusion_editor.dart`
+
+```dart
+// Abrir editor de oclusiones
+final occlusions = await ImageOcclusionEditor.open(
+  context,
+  imagePath: '/path/to/image.png',
+  aspectRatio: 16/9,
+  initialOcclusions: [], // Oclusiones existentes
+);
+```
+
+**Características:**
+- Pantalla completa con zoom (0.5x - 5x)
+- Modo **Dibujar** (naranja): Arrastra para crear oclusión
+- Modo **Navegar** (azul): Arrastra para mover imagen
+- Coordenadas normalizadas (0-1) para diferentes resoluciones
+- Botones deshacer y limpiar todo
+
+#### Oclusiones de Texto (Cloze)
+
+**Formato en Delta JSON:**
+```json
+{
+  "insert": "La capital de Francia es ",
+  "attributes": {}
+},
+{
+  "insert": "París",
+  "attributes": {"occlusion": "1"}
+},
+{
+  "insert": ".\n"
+}
+```
+
+#### Oclusiones de Tabla
+
+**Archivo:** `lib/features/notes/presentation/widgets/table_occlusion_editor.dart`
+
+Permite ocultar celdas específicas de una tabla.
+
+#### Oclusiones LaTeX
+
+**Archivo:** `lib/features/notes/presentation/widgets/latex_occlusion_editor.dart`
+
+Permite ocultar partes de fórmulas matemáticas.
+
+---
+
+### 3. Sistema SRS (Spaced Repetition System)
+
+**Archivos:**
+- `lib/core/services/srs_service.dart` - Algoritmo SM-2
+- `lib/core/services/srs_config_service.dart` - Configuración
+
+#### Algoritmo SM-2
+
+```dart
+// Cálculo del próximo intervalo
+SRSResult calculateNextReview(Note note, int quality) {
+  // quality: 0-5 (0-2 = incorrecto, 3-5 = correcto)
+
+  if (quality < 3) {
+    // Respuesta incorrecta: reiniciar
+    return SRSResult(
+      interval: 1,
+      easeFactor: max(1.3, easeFactor - 0.2),
+      state: 'relearning',
+    );
+  }
+
+  // Respuesta correcta
+  double newEF = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+  int newInterval;
+
+  if (consecutiveCorrect == 0) {
+    newInterval = 1;
+  } else if (consecutiveCorrect == 1) {
+    newInterval = 6;
+  } else {
+    newInterval = (interval * newEF).round();
+  }
+
+  return SRSResult(
+    interval: newInterval,
+    easeFactor: max(1.3, newEF),
+    state: 'review',
+  );
+}
+```
+
+#### Estados SRS
+
+| Estado | Descripción |
+|--------|-------------|
+| `new` | Tarjeta nueva, nunca revisada |
+| `learning` | En proceso de aprendizaje inicial |
+| `review` | En ciclo de repaso normal |
+| `relearning` | Olvidada, re-aprendiendo |
+
+---
+
+### 4. Pomodoro Timer
+
+**Archivo:** `lib/features/pomodoro/presentation/widgets/floating_pomodoro_widget.dart`
+
+#### Características
+- Widget flotante y arrastrable
+- Se puede mover a cualquier parte de la pantalla
+- Persiste posición entre sesiones
+- Configurable: duración de trabajo y descanso
+- Integrado con sesiones de estudio
+
+#### Uso
+
+```dart
+// El widget se añade automáticamente en app.dart
+builder: (context, child) {
+  return Overlay(
+    initialEntries: [
+      OverlayEntry(
+        builder: (context) => Stack(
+          children: [
+            child ?? const SizedBox.shrink(),
+            const FloatingPomodoroWidget(), // ← Aquí
+          ],
+        ),
+      ),
+    ],
+  );
+},
+```
+
+---
+
+## Instalación y Desarrollo
+
+### Requisitos
+
+| Plataforma | Requisitos |
+|------------|------------|
+| **Todas** | Flutter SDK 3.27.1+, Dart SDK 3.5.0+ |
+| **Windows** | Visual Studio 2022 con "Desktop development with C++" |
+| **Linux** | Clang, CMake, GTK development headers, pkg-config |
+| **Android** | Android Studio, Android SDK |
+
+### Configuración Inicial
 
 ```bash
+# 1. Clonar repositorio
+git clone https://github.com/Canazachyub/sinapsis.git
+cd sinapsis
+
+# 2. Crear archivo .env (opcional, para Supabase)
+cp .env.example .env
+# Editar .env con tus credenciales de Supabase
+
+# 3. Instalar dependencias
 flutter pub get
-flutter run -d linux
+
+# 4. Generar código (Drift, Freezed, etc.)
+dart run build_runner build --delete-conflicting-outputs
+
+# 5. Ejecutar
+flutter run -d linux    # Linux
+flutter run -d windows  # Windows
+flutter run -d chrome   # Web (experimental)
 ```
 
-### Android
+### Variables de Entorno (.env)
 
-```bash
-flutter build apk --release
+```env
+# Modo offline (sin Supabase)
+APP_ENV=demo
+
+# Con Supabase
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_ANON_KEY=tu-anon-key
 ```
 
-## Documentación
-
-- [QUICK_START_WINDOWS.md](QUICK_START_WINDOWS.md) - Inicio rápido para Windows
-- [WINDOWS_BUILD_GUIDE.md](WINDOWS_BUILD_GUIDE.md) - Guía completa de compilación Windows
-- [TESTING_GUIDE.md](TESTING_GUIDE.md) - Guía de pruebas y QA
-- [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) - Resumen técnico de implementación
+---
 
 ## Compilación
 
-### Windows (requiere Windows host o GitHub Actions)
+### Windows (GitHub Actions - Automático)
 
-**Automático con GitHub Actions:**
 ```bash
+# Push a main dispara el build automáticamente
+git add -A
+git commit -m "feat: nueva característica"
 git push origin main
-# Espera la compilación en Actions
-# Descarga sinapsis-windows-release.zip
+
+# Descargar desde:
+# https://github.com/Canazachyub/sinapsis/actions
+# → Artifacts → sinapsis-windows-release.zip
 ```
 
-**Manual en Windows:**
-```powershell
-# Ejecutar script automático
-.\build-windows.ps1
+### Windows (Manual)
 
-# O manualmente
+```powershell
+# Opción 1: Script automático
+.\build_windows.ps1
+
+# Opción 2: Manual
 flutter build windows --release
+
+# El ejecutable estará en:
+# build\windows\x64\runner\Release\sinapsis.exe
 ```
 
 ### Linux
 
 ```bash
 flutter build linux --release
+# Resultado en: build/linux/x64/release/bundle/
 ```
 
 ### Android
 
 ```bash
 flutter build apk --release
+# Resultado en: build/app/outputs/flutter-apk/app-release.apk
 ```
 
-## Requisitos de Desarrollo
+---
 
-- Flutter SDK 3.27.1+
-- Dart SDK 3.5.0+
-- **Para Windows:** Visual Studio 2022 con "Desktop development with C++"
-- **Para Linux:** Clang, CMake, GTK development headers
-- **Para Android:** Android Studio, Android SDK
+## Guía de Modificación
 
-## Arquitectura
+### Agregar Nueva Fuente al Editor
 
-```
-lib/
-├── core/                    # Servicios centrales
-│   ├── database/           # Drift database
-│   ├── services/           # SRS service, etc.
-│   └── theme/              # Temas de la app
-├── features/               # Características por módulo
-│   ├── auth/              # Autenticación
-│   ├── courses/           # Gestión de cursos
-│   ├── notes/             # Notas y SRS
-│   ├── pomodoro/          # Pomodoro Timer
-│   └── dashboard/         # Estadísticas
-└── injection_container.dart # Dependency injection
+1. Editar `lib/features/notes/presentation/widgets/rich_document_editor.dart`
+2. Buscar `fontFamilyValues` (línea ~2560)
+3. Agregar la fuente:
+
+```dart
+fontFamilyValues: const {
+  'Sans Serif': 'sans-serif',
+  'Mi Nueva Fuente': 'MiNuevaFuente', // ← Agregar aquí
+  // ...
+},
 ```
 
-## Estado del Proyecto
+### Agregar Nuevo Tamaño de Fuente
 
-**Versión actual:** 1.0.0
+1. Mismo archivo, buscar `fontSizesValues` (línea ~2572)
+2. Agregar:
 
-**Características implementadas:**
-- ✅ Autenticación con Supabase
-- ✅ CRUD de Cursos y Notas
-- ✅ Sistema SRS con algoritmo SM-2
-- ✅ Pomodoro Timer flotante
-- ✅ Estadísticas en tiempo real
-- ✅ Revisión de notas estilo Anki
-- ✅ Soporte Windows, Linux, Android
+```dart
+fontSizesValues: const {
+  'Pequeño': '10',
+  'Gigante': '48', // ← Agregar aquí
+  // ...
+},
+```
 
-**Próximas características:**
-- ⏳ Notificaciones push para repasos
-- ⏳ Sincronización en tiempo real
-- ⏳ Importación/Exportación de mazos
-- ⏳ Soporte iOS
-- ⏳ Aplicación Web
+### Modificar Algoritmo SRS
 
-## Contribuir
+1. Editar `lib/core/services/srs_service.dart`
+2. La función principal es `calculateNextReview()`
+3. Parámetros ajustables:
+   - Factor de facilidad inicial (2.5)
+   - Intervalos iniciales (1, 6 días)
+   - Penalización por error (-0.2)
 
-Las contribuciones son bienvenidas. Por favor:
+### Agregar Nueva Feature
 
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
+1. Crear estructura en `lib/features/nueva_feature/`:
+```
+nueva_feature/
+├── data/
+│   ├── datasources/
+│   ├── models/
+│   └── repositories/
+├── domain/
+│   ├── entities/
+│   ├── repositories/
+│   └── usecases/
+└── presentation/
+    ├── bloc/
+    ├── pages/
+    └── widgets/
+```
 
-## Licencia
+2. Registrar en `lib/injection_container.dart`
+3. Agregar rutas en `lib/app.dart`
 
-Este proyecto es de código abierto y está disponible bajo la licencia MIT.
+### Modificar Tema
 
-## Soporte
+1. Editar `lib/core/theme/app_theme.dart`
+2. Modificar `lightTheme` o `darkTheme`
 
-¿Encontraste un bug o tienes una sugerencia?
-- Abre un issue en GitHub
-- Consulta la documentación en la carpeta docs/
+### Agregar Nueva Tabla a BD
+
+1. Editar `lib/core/database/database.dart`
+2. Crear clase de tabla:
+```dart
+class MiNuevaTabla extends Table {
+  TextColumn get id => text()();
+  // ... columnas
+  @override
+  Set<Column> get primaryKey => {id};
+}
+```
+
+3. Agregar a `@DriftDatabase(tables: [..., MiNuevaTabla])`
+4. Incrementar `schemaVersion`
+5. Agregar migración en `onUpgrade`
+6. Regenerar: `dart run build_runner build`
+
+---
+
+## Archivos Clave para Modificaciones
+
+| Archivo | Propósito |
+|---------|-----------|
+| `lib/app.dart` | Configuración de MaterialApp, rutas, localización |
+| `lib/injection_container.dart` | Inyección de dependencias |
+| `lib/core/database/database.dart` | Esquema de base de datos |
+| `lib/core/services/srs_service.dart` | Algoritmo de repetición espaciada |
+| `lib/features/notes/presentation/widgets/rich_document_editor.dart` | Editor de texto principal |
+| `lib/features/notes/presentation/widgets/image_occlusion_editor.dart` | Editor de oclusiones de imagen |
+| `lib/features/notes/presentation/widgets/study_document_viewer.dart` | Visor de modo estudio |
+| `lib/features/pomodoro/presentation/widgets/floating_pomodoro_widget.dart` | Timer Pomodoro |
+| `pubspec.yaml` | Dependencias del proyecto |
+
+---
+
+## Localización
+
+La app está configurada en **español** por defecto.
+
+**Configuración en `lib/app.dart`:**
+```dart
+locale: const Locale('es', 'ES'),
+supportedLocales: const [
+  Locale('es', 'ES'),
+  Locale('en', 'US'),
+],
+localizationsDelegates: const [
+  GlobalMaterialLocalizations.delegate,
+  GlobalWidgetsLocalizations.delegate,
+  GlobalCupertinoLocalizations.delegate,
+  FlutterQuillLocalizations.delegate,
+],
+```
+
+---
+
+## Tests
+
+```bash
+# Ejecutar todos los tests
+flutter test
+
+# Tests específicos
+flutter test test/core/services/srs_service_test.dart
+flutter test test/features/pomodoro/
+```
+
+**Tests disponibles:**
+- `test/core/services/srs_service_test.dart` - 14 tests del algoritmo SRS
+- `test/core/services/srs_config_service_test.dart` - 12 tests de configuración
+- `test/features/pomodoro/floating_pomodoro_widget_test.dart` - 15 tests del timer
+
+---
 
 ## Créditos
 
 - **SM-2 Algorithm:** SuperMemo/Anki
 - **Flutter Framework:** Google
 - **BLoC Pattern:** Felix Angelov
+- **flutter_quill:** singerdmx
 
 ---
 
-**Última actualización:** 2025-10-27
+## Licencia
+
+MIT License - Ver archivo LICENSE
+
+---
+
+**Última actualización:** 2025-12-19
+**Versión:** 1.0.0
