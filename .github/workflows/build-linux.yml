@@ -1,0 +1,78 @@
+name: Build Linux Release
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libstdc++-12-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.1'
+          channel: 'stable'
+
+      - name: Flutter Doctor
+        run: flutter doctor -v
+
+      - name: Create .env file
+        run: |
+          echo "SUPABASE_URL=https://placeholder.supabase.co" > .env
+          echo "SUPABASE_ANON_KEY=placeholder-anon-key" >> .env
+          echo "SENTRY_DSN=https://placeholder-sentry-dsn" >> .env
+          echo "APP_ENV=demo" >> .env
+
+      - name: Create assets directories
+        run: |
+          mkdir -p assets/images
+          mkdir -p assets/fonts
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Generate Code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build Linux Release
+        run: flutter build linux --release
+
+      - name: Create TAR.GZ Archive
+        run: |
+          cd build/linux/x64/release/bundle
+          tar -czvf ../../../../../sinapsis-linux.tar.gz *
+
+      - name: Upload Linux Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sinapsis-linux-release
+          path: sinapsis-linux.tar.gz
+          retention-days: 30
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: sinapsis-linux.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
