@@ -6,7 +6,7 @@
 #define MyAppName "Sinapsis"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Sinapsis Team"
-#define MyAppURL "https://github.com/tu-usuario/sinapsis"
+#define MyAppURL "https://github.com/Canazachyub/sinapsis"
 #define MyAppExeName "sinapsis.exe"
 
 [Setup]

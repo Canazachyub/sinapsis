@@ -18,8 +18,9 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.1'
+          flutter-version: '3.29.3'
           channel: 'stable'
+          cache: true
 
       - name: Flutter Doctor
         run: flutter doctor -v
@@ -37,6 +38,9 @@ jobs:
       - name: Generate Code
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Run Tests
+        run: flutter test
+
       - name: Build Windows Release
         run: flutter build windows --release
 
@@ -45,17 +49,38 @@ jobs:
           cd build/windows/x64/runner/Release
           Compress-Archive -Path * -DestinationPath ../../../../../sinapsis-windows.zip
 
-      - name: Upload Windows Build Artifact
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Create Installer Output Directory
+        run: mkdir -p build/installer
+        shell: bash
+
+      - name: Build Installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\sinapsis_installer.iss
+        shell: pwsh
+
+      - name: Upload Windows ZIP Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sinapsis-windows-release
+          name: sinapsis-windows-zip
           path: sinapsis-windows.zip
+          retention-days: 30
+
+      - name: Upload Windows Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sinapsis-windows-installer
+          path: build/installer/Sinapsis_Setup_*.exe
           retention-days: 30
 
       - name: Create Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: sinapsis-windows.zip
+          files: |
+            sinapsis-windows.zip
+            build/installer/Sinapsis_Setup_*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
