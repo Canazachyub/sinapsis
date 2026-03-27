@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../bloc/pomodoro_bloc.dart';
@@ -30,8 +31,13 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
           return const SizedBox.shrink();
         }
 
-        final widgetWidth = _isExpanded ? 280.0 : 120.0;
-        final widgetHeight = _isExpanded ? 140.0 : 80.0;
+        final isMobile = Platform.isAndroid || Platform.isIOS;
+        final widgetWidth = _isExpanded
+            ? (isMobile ? 220.0 : 280.0)
+            : (isMobile ? 90.0 : 120.0);
+        final widgetHeight = _isExpanded
+            ? (isMobile ? 120.0 : 140.0)
+            : (isMobile ? 64.0 : 80.0);
 
         // Calcular posición real (desde bottom-right)
         final left = screenSize.width - _position.dx - widgetWidth;
@@ -110,6 +116,7 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
   }
 
   Widget _buildCollapsedView(BuildContext context, PomodoroBlockState state) {
+    final isMobile = Platform.isAndroid || Platform.isIOS;
     String time = '25:00';
     IconData icon = Icons.timer;
 
@@ -127,20 +134,23 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
       onTap: () => setState(() => _isExpanded = true),
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        padding: EdgeInsets.fromLTRB(
+          isMobile ? 10 : 16, isMobile ? 8 : 12,
+          isMobile ? 10 : 16, isMobile ? 10 : 16,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 4), // Espacio para la barra de arrastre
-            Icon(icon, color: Colors.white, size: 24),
+            Icon(icon, color: Colors.white, size: isMobile ? 20 : 24),
             const SizedBox(height: 4),
             Text(
               time,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
-                fontSize: 16,
+                fontSize: isMobile ? 13 : 16,
                 fontWeight: FontWeight.bold,
-                fontFeatures: [FontFeature.tabularFigures()],
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ],
@@ -150,6 +160,7 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
   }
 
   Widget _buildExpandedView(BuildContext context, PomodoroBlockState state) {
+    final isMobile = Platform.isAndroid || Platform.isIOS;
     final bloc = context.read<PomodoroBloc>();
 
     String title = 'Pomodoro';
@@ -220,7 +231,7 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
     }
 
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(isMobile ? 8 : 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,31 +250,31 @@ class _FloatingPomodoroWidgetState extends State<FloatingPomodoroWidget> {
               ),
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.white,
-                  fontSize: 14,
+                  fontSize: isMobile ? 12 : 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),
               InkWell(
                 onTap: () => setState(() => _isExpanded = false),
-                child: const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 20),
+                child: Icon(Icons.keyboard_arrow_down, color: Colors.white, size: isMobile ? 18 : 20),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: isMobile ? 4 : 8),
           Center(
             child: Text(
               time,
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
-                fontSize: 32,
+                fontSize: isMobile ? 24 : 32,
                 fontWeight: FontWeight.bold,
-                fontFeatures: [FontFeature.tabularFigures()],
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: isMobile ? 8 : 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: actions,

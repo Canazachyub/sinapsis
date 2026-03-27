@@ -7,7 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_linux
   gtk
   irondash_engine_context
-  sqlite3_flutter_libs
+  printing
   super_native_extensions
   url_launcher_linux
 )

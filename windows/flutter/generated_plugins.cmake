@@ -4,10 +4,11 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
+  clipboard
   desktop_drop
   file_selector_windows
   irondash_engine_context
-  sqlite3_flutter_libs
+  printing
   super_native_extensions
   url_launcher_windows
 )

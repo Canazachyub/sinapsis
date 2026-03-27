@@ -1,12 +1,11 @@
-/// Constantes para el sistema de oclusión de imágenes
-///
-/// Este archivo define el tamaño estándar que se usará para todas las imágenes
-/// con oclusión en todos los contextos (editor, preview, modo estudio).
-///
-/// Al usar un ancho fijo y calcular la altura basada en el aspect ratio original,
-/// garantizamos que las coordenadas normalizadas (0-1) de las oclusiones
-/// coincidan perfectamente en todos los contextos.
-library;
+// Constantes para el sistema de oclusión de imágenes
+//
+// Este archivo define el tamaño estándar que se usará para todas las imágenes
+// con oclusión en todos los contextos (editor, preview, modo estudio).
+//
+// Al usar un ancho fijo y calcular la altura basada en el aspect ratio original,
+// garantizamos que las coordenadas normalizadas (0-1) de las oclusiones
+// coincidan perfectamente en todos los contextos.
 
 class ImageConstants {
   ImageConstants._(); // Constructor privado para evitar instanciación
@@ -27,6 +26,7 @@ class ImageConstants {
   /// - Imagen 800x600 → aspectRatio = 1.333 → altura = 600
   /// - Imagen 1080x1920 (vertical) → aspectRatio = 0.562 → altura = 1422
   static double calculateHeight(double aspectRatio) {
+    if (aspectRatio <= 0) return occlusionImageWidth;
     return occlusionImageWidth / aspectRatio;
   }
 

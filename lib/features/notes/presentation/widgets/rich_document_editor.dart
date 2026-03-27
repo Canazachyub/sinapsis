@@ -9,6 +9,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:dio/dio.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:sinapsis/core/constants/image_constants.dart';
 import 'package:sinapsis/core/constants/keyboard_shortcuts.dart';
 import 'package:sinapsis/core/utils/markdown_to_quill.dart';
@@ -120,12 +123,9 @@ class ImageEmbedBuilder extends quill.EmbedBuilder {
   @override
   Widget build(
     BuildContext context,
-    quill.QuillController controller,
-    quill.Embed node,
-    bool readOnly,
-    bool inline,
-    TextStyle textStyle,
+    quill.EmbedContext embedContext,
   ) {
+    final node = embedContext.node;
     final imageUrl = node.value.data;
 
     return Padding(
@@ -169,12 +169,11 @@ class ImageOccludedEmbedBuilder extends quill.EmbedBuilder {
   @override
   Widget build(
     BuildContext context,
-    quill.QuillController controller,
-    quill.Embed node,
-    bool readOnly,
-    bool inline,
-    TextStyle textStyle,
+    quill.EmbedContext embedContext,
   ) {
+    final node = embedContext.node;
+    final controller = embedContext.controller;
+    final readOnly = embedContext.readOnly;
     try {
       final data = jsonDecode(node.value.data) as Map<String, dynamic>;
       final imagePath = data['path'] as String;
@@ -416,12 +415,9 @@ class LatexEmbedBuilder extends quill.EmbedBuilder {
   @override
   Widget build(
     BuildContext context,
-    quill.QuillController controller,
-    quill.Embed node,
-    bool readOnly,
-    bool inline,
-    TextStyle textStyle,
+    quill.EmbedContext embedContext,
   ) {
+    final node = embedContext.node;
     final latexCode = node.value.data as String;
 
     return Padding(
@@ -536,12 +532,9 @@ class LatexOccludedEmbedBuilder extends quill.EmbedBuilder {
   @override
   Widget build(
     BuildContext context,
-    quill.QuillController controller,
-    quill.Embed node,
-    bool readOnly,
-    bool inline,
-    TextStyle textStyle,
+    quill.EmbedContext embedContext,
   ) {
+    final node = embedContext.node;
     try {
       final data = jsonDecode(node.value.data) as Map<String, dynamic>;
       final latexCode = data['code'] as String;
@@ -749,12 +742,11 @@ class TableEmbedBuilder extends quill.EmbedBuilder {
   @override
   Widget build(
     BuildContext context,
-    quill.QuillController controller,
-    quill.Embed node,
-    bool readOnly,
-    bool inline,
-    TextStyle textStyle,
+    quill.EmbedContext embedContext,
   ) {
+    final node = embedContext.node;
+    final controller = embedContext.controller;
+    final readOnly = embedContext.readOnly;
     try {
       final data = jsonDecode(node.value.data) as Map<String, dynamic>;
       final rows = data['rows'] as int;
@@ -1025,12 +1017,11 @@ class TableOccludedEmbedBuilder extends quill.EmbedBuilder {
   @override
   Widget build(
     BuildContext context,
-    quill.QuillController controller,
-    quill.Embed node,
-    bool readOnly,
-    bool inline,
-    TextStyle textStyle,
+    quill.EmbedContext embedContext,
   ) {
+    final node = embedContext.node;
+    final controller = embedContext.controller;
+    final readOnly = embedContext.readOnly;
     try {
       final data = jsonDecode(node.value.data) as Map<String, dynamic>;
       final rows = data['rows'] as int;
@@ -1441,12 +1432,14 @@ class RichDocumentEditor extends StatefulWidget {
   final String? initialContent; // Delta JSON
   final ValueChanged<String> onContentChanged;
   final bool readOnly;
+  final String? title; // Título del documento (para exportar PDF)
 
   const RichDocumentEditor({
     super.key,
     this.initialContent,
     required this.onContentChanged,
     this.readOnly = false,
+    this.title,
   });
 
   @override
@@ -1531,8 +1524,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       // Verificar si parece Markdown
       if (!MarkdownToQuill.looksLikeMarkdown(pastedText)) {
         // Pegar como texto plano
-        final index = _controller.selection.baseOffset;
-        final length = _controller.selection.extentOffset - index;
+        final selection = _controller.selection;
+        final index = selection.start;
+        final length = selection.end - selection.start;
         _controller.replaceText(index, length, pastedText, null);
         return;
       }
@@ -1542,8 +1536,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       final deltaList = json.decode(deltaJson) as List;
 
       // Obtener posición actual
-      final index = _controller.selection.baseOffset;
-      final length = _controller.selection.extentOffset - index;
+      final selection = _controller.selection;
+      final index = selection.start;
+      final length = selection.end - selection.start;
 
       // Obtener el documento actual como Delta JSON
       final currentDelta = _controller.document.toDelta();
@@ -2298,8 +2293,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
   }
 
   void _insertLatexWithOcclusions(String latexCode, List<LatexOcclusion> occlusions) {
-    final index = _controller.selection.baseOffset;
-    final length = _controller.selection.extentOffset - index;
+    final selection = _controller.selection;
+    final index = selection.start;
+    final length = selection.end - selection.start;
 
     if (occlusions.isEmpty) {
       // Insertar LaTeX sin oclusiones
@@ -2345,8 +2341,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
   }
 
   void _insertTable(int rows, int columns, List<List<String>> cells) {
-    final index = _controller.selection.baseOffset;
-    final length = _controller.selection.extentOffset - index;
+    final selection = _controller.selection;
+    final index = selection.start;
+    final length = selection.end - selection.start;
 
     final tableData = {
       'rows': rows,
@@ -2456,8 +2453,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
   }
 
   void _insertImageWithOcclusions(String imagePath, List<Rect> occlusions, double aspectRatio) {
-    final index = _controller.selection.baseOffset;
-    final length = _controller.selection.extentOffset - index;
+    final selection = _controller.selection;
+    final index = selection.start;
+    final length = selection.end - selection.start;
 
     // Crear datos de imagen con oclusiones y aspect ratio
     final imageData = {
@@ -2542,10 +2540,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
                     children: [
                       SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
-                        child: quill.QuillToolbar.simple(
-                          configurations: quill.QuillSimpleToolbarConfigurations(
-                            controller: _controller,
-                            sharedConfigurations: const quill.QuillSharedConfigurations(),
+                        child: quill.QuillSimpleToolbar(
+                          controller: _controller,
+                          config: quill.QuillSimpleToolbarConfig(
                             showAlignmentButtons: true,
                             showBackgroundColorButton: true,
                             showBoldButton: true,
@@ -2557,27 +2554,33 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
                             showDividers: true,
                             // Fuentes habilitadas
                             showFontFamily: true,
-                            fontFamilyValues: const {
-                              'Sans Serif': 'sans-serif',
-                              'Serif': 'serif',
-                              'Monospace': 'monospace',
-                              'Roboto': 'Roboto',
-                              'Open Sans': 'Open Sans',
-                              'Lato': 'Lato',
-                              'Georgia': 'Georgia',
-                              'Courier': 'Courier New',
-                            },
+                            buttonOptions: quill.QuillSimpleToolbarButtonOptions(
+                              fontFamily: quill.QuillToolbarFontFamilyButtonOptions(
+                                items: const {
+                                  'Sans Serif': 'sans-serif',
+                                  'Serif': 'serif',
+                                  'Monospace': 'monospace',
+                                  'Roboto': 'Roboto',
+                                  'Open Sans': 'Open Sans',
+                                  'Lato': 'Lato',
+                                  'Georgia': 'Georgia',
+                                  'Courier': 'Courier New',
+                                },
+                              ),
+                              fontSize: quill.QuillToolbarFontSizeButtonOptions(
+                                items: const {
+                                  'Pequeño': '10',
+                                  'Normal': '14',
+                                  'Mediano': '16',
+                                  'Grande': '18',
+                                  'Muy grande': '22',
+                                  'Título': '28',
+                                  'Encabezado': '36',
+                                },
+                              ),
+                            ),
                             // Tamaños de fuente habilitados
                             showFontSize: true,
-                            fontSizesValues: const {
-                              'Pequeño': '10',
-                              'Normal': '14',
-                              'Mediano': '16',
-                              'Grande': '18',
-                              'Muy grande': '22',
-                              'Título': '28',
-                              'Encabezado': '36',
-                            },
                             // Interlineado habilitado
                             showLineHeightButton: true,
                             showHeaderStyle: true,
@@ -2628,6 +2631,8 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
                               _buildTableButton(),
                               _buildMarkdownButton(),
                               _buildEditOcclusionsButton(),
+                              const VerticalDivider(),
+                              _buildExportPdfButton(),
                             ],
                           ),
                         ),
@@ -2658,11 +2663,8 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
             ),
             padding: const EdgeInsets.all(16),
             child: quill.QuillEditor.basic(
-              configurations: quill.QuillEditorConfigurations(
-                controller: _controller,
-                sharedConfigurations: const quill.QuillSharedConfigurations(
-                  locale: Locale('es'),
-                ),
+              controller: _controller,
+              config: quill.QuillEditorConfig(
                 scrollable: true,
                 autoFocus: false,
                 expands: false,
@@ -2686,8 +2688,8 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       ],
     );
 
-    // Envolver con DropTarget si no es readOnly
-    if (!widget.readOnly) {
+    // Envolver con DropTarget solo en desktop (no funciona en móvil)
+    if (!widget.readOnly && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       editorContent = DropTarget(
         onDragEntered: (details) {
           setState(() => _isDragging = true);
@@ -2810,6 +2812,539 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       ),
     );
   }
+
+  Widget _buildExportPdfButton() {
+    return Tooltip(
+      message: 'Exportar a PDF',
+      child: IconButton(
+        icon: const Icon(Icons.picture_as_pdf, size: 20),
+        onPressed: _exportToPdf,
+        color: Colors.red.shade600,
+      ),
+    );
+  }
+
+  Future<void> _exportToPdf() async {
+    try {
+      // Obtener el contenido del documento
+      final document = _controller.document;
+      final plainText = document.toPlainText();
+
+      if (plainText.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('El documento está vacío'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Mostrar diálogo de opciones de exportación
+      final result = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => _PdfExportDialog(
+          documentTitle: widget.title ?? 'Documento',
+        ),
+      );
+
+      if (result == null || !mounted) return;
+
+      // Generar el PDF
+      final pdf = await _generatePdf(
+        title: result['title'] as String,
+        includeTitle: result['includeTitle'] as bool,
+        fontSize: result['fontSize'] as double,
+        pageFormat: result['pageFormat'] as PdfPageFormat,
+      );
+
+      // Mostrar vista previa e imprimir/guardar
+      await Printing.layoutPdf(
+        onLayout: (format) async => pdf.save(),
+        name: '${result['title']}.pdf',
+      );
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al exportar PDF: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<pw.Document> _generatePdf({
+    required String title,
+    required bool includeTitle,
+    required double fontSize,
+    required PdfPageFormat pageFormat,
+  }) async {
+    final pdf = pw.Document();
+    final document = _controller.document;
+
+    // Cargar fuentes con soporte Unicode completo (Google Fonts)
+    final fontRegular = await PdfGoogleFonts.notoSansRegular();
+    final fontBold = await PdfGoogleFonts.notoSansBold();
+    final fontItalic = await PdfGoogleFonts.notoSansItalic();
+    final fontBoldItalic = await PdfGoogleFonts.notoSansBoldItalic();
+
+    // Crear tema con fuentes Unicode
+    final baseStyle = pw.TextStyle(
+      font: fontRegular,
+      fontBold: fontBold,
+      fontItalic: fontItalic,
+      fontBoldItalic: fontBoldItalic,
+      fontSize: fontSize,
+    );
+
+    // Obtener las operaciones Delta del documento
+    final delta = document.toDelta();
+    final ops = delta.toList();
+
+    // Convertir Delta a widgets PDF
+    final List<pw.Widget> pdfWidgets = [];
+
+    // Agregar título si está habilitado
+    if (includeTitle && title.isNotEmpty) {
+      pdfWidgets.add(
+        pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 20),
+          child: pw.Text(
+            title,
+            style: baseStyle.copyWith(
+              fontSize: fontSize + 10,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ),
+      );
+      pdfWidgets.add(pw.Divider(thickness: 1, color: PdfColors.grey400));
+      pdfWidgets.add(pw.SizedBox(height: 15));
+    }
+
+    // Acumular texto con el mismo estilo para crear RichText
+    List<pw.TextSpan> currentSpans = [];
+
+    pw.TextStyle getStyleFromAttributes(Map<String, dynamic>? attributes, double baseFontSize) {
+      pw.FontWeight fontWeight = pw.FontWeight.normal;
+      pw.FontStyle fontStyle = pw.FontStyle.normal;
+      pw.TextDecoration? decoration;
+      double textFontSize = baseFontSize;
+      PdfColor? textColor;
+      PdfColor? bgColor;
+
+      if (attributes != null) {
+        if (attributes['bold'] == true) {
+          fontWeight = pw.FontWeight.bold;
+        }
+        if (attributes['italic'] == true) {
+          fontStyle = pw.FontStyle.italic;
+        }
+        if (attributes['underline'] == true) {
+          decoration = pw.TextDecoration.underline;
+        }
+        if (attributes['strike'] == true) {
+          decoration = pw.TextDecoration.lineThrough;
+        }
+        if (attributes['size'] != null) {
+          final sizeStr = attributes['size'].toString();
+          textFontSize = double.tryParse(sizeStr) ?? baseFontSize;
+        }
+        if (attributes['header'] != null) {
+          final headerLevel = attributes['header'] as int;
+          textFontSize = baseFontSize + (4 - headerLevel) * 4;
+          fontWeight = pw.FontWeight.bold;
+        }
+        if (attributes['color'] != null) {
+          textColor = _parseColor(attributes['color'].toString());
+        }
+        if (attributes['background'] != null) {
+          bgColor = _parseColor(attributes['background'].toString());
+        }
+      }
+
+      return pw.TextStyle(
+        font: fontRegular,
+        fontBold: fontBold,
+        fontItalic: fontItalic,
+        fontBoldItalic: fontBoldItalic,
+        fontSize: textFontSize,
+        fontWeight: fontWeight,
+        fontStyle: fontStyle,
+        decoration: decoration,
+        color: textColor,
+        background: bgColor != null ? pw.BoxDecoration(color: bgColor) : null,
+      );
+    }
+
+    void flushCurrentSpans() {
+      if (currentSpans.isNotEmpty) {
+        pdfWidgets.add(
+          pw.RichText(
+            text: pw.TextSpan(
+              children: List.from(currentSpans),
+              style: baseStyle,
+            ),
+          ),
+        );
+        currentSpans.clear();
+      }
+    }
+
+    for (final op in ops) {
+      if (op.data is String) {
+        final text = op.data as String;
+        final attributes = op.attributes;
+        final style = getStyleFromAttributes(attributes, fontSize);
+
+        // Procesar línea por línea
+        final lines = text.split('\n');
+        for (int i = 0; i < lines.length; i++) {
+          if (lines[i].isNotEmpty) {
+            currentSpans.add(pw.TextSpan(text: lines[i], style: style));
+          }
+
+          // Si hay salto de línea, crear nuevo párrafo
+          if (i < lines.length - 1) {
+            flushCurrentSpans();
+            pdfWidgets.add(pw.SizedBox(height: fontSize * 0.6));
+          }
+        }
+      } else if (op.data is Map) {
+        // Manejar embeds (imágenes, etc.)
+        final embedData = op.data as Map;
+
+        // Flush texto pendiente antes de embed
+        flushCurrentSpans();
+
+        if (embedData.containsKey('image')) {
+          final imagePath = embedData['image'] as String;
+          try {
+            Uint8List? imageBytes;
+
+            if (imagePath.startsWith('http')) {
+              // Imagen de red
+              final response = await Dio().get<List<int>>(
+                imagePath,
+                options: Options(responseType: ResponseType.bytes),
+              );
+              if (response.data != null) {
+                imageBytes = Uint8List.fromList(response.data!);
+              }
+            } else if (File(imagePath).existsSync()) {
+              // Imagen local
+              imageBytes = await File(imagePath).readAsBytes();
+            }
+
+            if (imageBytes != null) {
+              final imageProvider = pw.MemoryImage(imageBytes);
+              pdfWidgets.add(pw.SizedBox(height: 10));
+              pdfWidgets.add(
+                pw.Center(
+                  child: pw.Container(
+                    constraints: pw.BoxConstraints(
+                      maxWidth: pageFormat.availableWidth * 0.85,
+                      maxHeight: pageFormat.availableHeight * 0.5,
+                    ),
+                    child: pw.Image(
+                      imageProvider,
+                      fit: pw.BoxFit.contain,
+                    ),
+                  ),
+                ),
+              );
+              pdfWidgets.add(pw.SizedBox(height: 10));
+            }
+          } catch (e) {
+            pdfWidgets.add(
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                margin: const pw.EdgeInsets.symmetric(vertical: 5),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey400),
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                ),
+                child: pw.Text(
+                  '[Imagen: $imagePath]',
+                  style: baseStyle.copyWith(
+                    color: PdfColors.grey600,
+                    fontStyle: pw.FontStyle.italic,
+                  ),
+                ),
+              ),
+            );
+          }
+        } else if (embedData.containsKey('image-occluded')) {
+          // Imagen con oclusiones
+          final occludedData = embedData['image-occluded'];
+          String? imagePath;
+          if (occludedData is Map) {
+            imagePath = occludedData['imagePath'] as String?;
+          }
+
+          if (imagePath != null && File(imagePath).existsSync()) {
+            try {
+              final imageBytes = await File(imagePath).readAsBytes();
+              final imageProvider = pw.MemoryImage(imageBytes);
+              pdfWidgets.add(pw.SizedBox(height: 10));
+              pdfWidgets.add(
+                pw.Center(
+                  child: pw.Container(
+                    constraints: pw.BoxConstraints(
+                      maxWidth: pageFormat.availableWidth * 0.85,
+                      maxHeight: pageFormat.availableHeight * 0.5,
+                    ),
+                    child: pw.Image(
+                      imageProvider,
+                      fit: pw.BoxFit.contain,
+                    ),
+                  ),
+                ),
+              );
+              pdfWidgets.add(pw.SizedBox(height: 10));
+            } catch (e) {
+              pdfWidgets.add(
+                pw.Text('[Imagen con oclusiones]', style: baseStyle),
+              );
+            }
+          }
+        } else if (embedData.containsKey('latex') || embedData.containsKey('latex-occluded')) {
+          // LaTeX - mostrar código en el PDF
+          final latexCode = embedData['latex'] ??
+                           (embedData['latex-occluded'] is Map
+                             ? embedData['latex-occluded']['code']
+                             : embedData['latex-occluded']);
+          if (latexCode != null) {
+            pdfWidgets.add(
+              pw.Container(
+                padding: const pw.EdgeInsets.all(8),
+                margin: const pw.EdgeInsets.symmetric(vertical: 5),
+                decoration: const pw.BoxDecoration(
+                  color: PdfColors.purple50,
+                  borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+                ),
+                child: pw.Text(
+                  latexCode.toString(),
+                  style: baseStyle.copyWith(
+                    font: await PdfGoogleFonts.robotoMonoRegular(),
+                    fontSize: fontSize - 1,
+                  ),
+                ),
+              ),
+            );
+          }
+        } else if (embedData.containsKey('table') || embedData.containsKey('table-occluded')) {
+          // Tabla
+          pdfWidgets.add(
+            pw.Container(
+              padding: const pw.EdgeInsets.all(8),
+              margin: const pw.EdgeInsets.symmetric(vertical: 5),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey400),
+              ),
+              child: pw.Text('[Tabla]', style: baseStyle),
+            ),
+          );
+        }
+      }
+    }
+
+    // Flush cualquier texto restante
+    flushCurrentSpans();
+
+    // Si no hay contenido, agregar mensaje
+    if (pdfWidgets.isEmpty) {
+      pdfWidgets.add(
+        pw.Text('(Documento vacío)', style: baseStyle.copyWith(color: PdfColors.grey)),
+      );
+    }
+
+    // Crear páginas del PDF
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: pageFormat,
+        margin: const pw.EdgeInsets.all(40),
+        build: (context) => pdfWidgets,
+        footer: (context) => pw.Container(
+          alignment: pw.Alignment.centerRight,
+          margin: const pw.EdgeInsets.only(top: 10),
+          child: pw.Text(
+            'Página ${context.pageNumber} de ${context.pagesCount}',
+            style: pw.TextStyle(
+              font: fontRegular,
+              fontSize: 10,
+              color: PdfColors.grey600,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return pdf;
+  }
+
+  PdfColor? _parseColor(String colorStr) {
+    try {
+      if (colorStr.startsWith('#')) {
+        final hex = colorStr.substring(1);
+        if (hex.length == 6) {
+          final r = int.parse(hex.substring(0, 2), radix: 16);
+          final g = int.parse(hex.substring(2, 4), radix: 16);
+          final b = int.parse(hex.substring(4, 6), radix: 16);
+          return PdfColor.fromInt((0xFF << 24) | (r << 16) | (g << 8) | b);
+        }
+      }
+    } catch (e) {
+      // Ignorar errores de parsing
+    }
+    return null;
+  }
+}
+
+/// Diálogo de opciones para exportar PDF
+class _PdfExportDialog extends StatefulWidget {
+  final String documentTitle;
+
+  const _PdfExportDialog({required this.documentTitle});
+
+  @override
+  State<_PdfExportDialog> createState() => _PdfExportDialogState();
+}
+
+class _PdfExportDialogState extends State<_PdfExportDialog> {
+  late TextEditingController _titleController;
+  bool _includeTitle = true;
+  double _fontSize = 12;
+  String _pageSize = 'A4';
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.documentTitle);
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
+  PdfPageFormat get _pageFormat {
+    switch (_pageSize) {
+      case 'Letter':
+        return PdfPageFormat.letter;
+      case 'Legal':
+        return PdfPageFormat.legal;
+      case 'A4':
+      default:
+        return PdfPageFormat.a4;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.picture_as_pdf, color: Colors.red.shade600),
+          const SizedBox(width: 12),
+          const Text('Exportar a PDF'),
+        ],
+      ),
+      content: SizedBox(
+        width: MediaQuery.of(context).size.width < 600 ? double.infinity : 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Título del documento
+            TextField(
+              controller: _titleController,
+              decoration: const InputDecoration(
+                labelText: 'Título del documento',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.title),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Incluir título en PDF
+            SwitchListTile(
+              title: const Text('Incluir título en el PDF'),
+              subtitle: const Text('Agregar el título como encabezado'),
+              value: _includeTitle,
+              onChanged: (value) => setState(() => _includeTitle = value),
+            ),
+            const Divider(),
+
+            // Tamaño de fuente
+            const Text('Tamaño de fuente:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Slider(
+                    value: _fontSize,
+                    min: 8,
+                    max: 18,
+                    divisions: 10,
+                    label: '${_fontSize.round()} pt',
+                    onChanged: (value) => setState(() => _fontSize = value),
+                  ),
+                ),
+                SizedBox(
+                  width: 50,
+                  child: Text(
+                    '${_fontSize.round()} pt',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Tamaño de página
+            const Text('Tamaño de página:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'A4', label: Text('A4')),
+                ButtonSegment(value: 'Letter', label: Text('Carta')),
+                ButtonSegment(value: 'Legal', label: Text('Legal')),
+              ],
+              selected: {_pageSize},
+              onSelectionChanged: (selection) {
+                setState(() => _pageSize = selection.first);
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: () {
+            Navigator.pop(context, {
+              'title': _titleController.text,
+              'includeTitle': _includeTitle,
+              'fontSize': _fontSize,
+              'pageFormat': _pageFormat,
+            });
+          },
+          icon: const Icon(Icons.picture_as_pdf),
+          label: const Text('Exportar'),
+        ),
+      ],
+    );
+  }
 }
 
 /// Visor de documentos (solo lectura)
@@ -2838,11 +3373,8 @@ class DocumentViewer extends StatelessWidget {
     }
 
     return quill.QuillEditor.basic(
-      configurations: quill.QuillEditorConfigurations(
-        controller: controller,
-        sharedConfigurations: const quill.QuillSharedConfigurations(
-          locale: Locale('es'),
-        ),
+      controller: controller,
+      config: quill.QuillEditorConfig(
         scrollable: true,
         autoFocus: false,
         expands: false,
@@ -2903,10 +3435,12 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
     return Dialog(
+      insetPadding: screenWidth < 600 ? const EdgeInsets.all(16) : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       child: Container(
-        width: 700,
-        padding: const EdgeInsets.all(24),
+        width: screenWidth < 600 ? double.infinity : 700,
+        padding: EdgeInsets.all(screenWidth < 600 ? 16 : 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

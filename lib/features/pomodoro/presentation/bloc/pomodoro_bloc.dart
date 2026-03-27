@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import '../../../../core/utils/logger.dart';
 import '../../domain/entities/pomodoro_session.dart';
 import '../../data/datasources/pomodoro_datasource.dart';
 
@@ -11,7 +12,7 @@ class PomodoroBloc extends Bloc<PomodoroEvent, PomodoroBlockState> {
   Timer? _timer;
   int _remainingSeconds = 0;
   int _completedPomodoros = 0;
-  final PomodoroConfig _config;
+  PomodoroConfig _config;
   final PomodoroDataSource? _pomodoroDataSource;
   String? _currentUserId;
 
@@ -159,7 +160,7 @@ class PomodoroBloc extends Bloc<PomodoroEvent, PomodoroBlockState> {
               );
             } catch (e) {
               // Log error but don't interrupt the flow
-              print('Error saving pomodoro session: $e');
+              AppLogger.e('Error saving pomodoro session', e);
             }
           }
 
@@ -194,10 +195,8 @@ class PomodoroBloc extends Bloc<PomodoroEvent, PomodoroBlockState> {
   }
 
   void _onUpdateConfig(UpdateConfig event, Emitter<PomodoroBlockState> emit) {
-    // Actualizar configuración (solo si no hay sesión activa)
     if (state is PomodoroInitial) {
-      // La configuración se actualiza pero necesitaríamos crear un nuevo bloc o manejar config como parte del state
-      // Por ahora simplemente re-emitimos el estado inicial
+      _config = event.config;
       emit(const PomodoroInitial());
     }
   }

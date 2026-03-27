@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_quill/translations.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
@@ -11,6 +11,7 @@ import 'features/pomodoro/presentation/bloc/pomodoro_bloc.dart';
 import 'features/pomodoro/presentation/widgets/floating_pomodoro_widget.dart';
 import 'features/dashboard/presentation/bloc/dashboard_bloc.dart';
 import 'features/theme/presentation/bloc/theme_bloc.dart';
+import 'features/sync/presentation/bloc/sync_bloc.dart';
 import 'features/theme/presentation/bloc/theme_event.dart';
 import 'features/theme/presentation/bloc/theme_state.dart';
 import 'features/auth/presentation/pages/login_page.dart';
@@ -42,6 +43,9 @@ class SinapsisApp extends StatelessWidget {
             pomodoroDataSource: sl(),
           ),
           lazy: false, // Mantener activo siempre
+        ),
+        BlocProvider(
+          create: (context) => sl<SyncBloc>(),
         ),
         BlocProvider(
           create: (context) => sl<ThemeBloc>()..add(ThemeLoaded()),
@@ -108,6 +112,8 @@ class SplashPage extends StatelessWidget {
           if (state is Authenticated) {
             // Establecer userId en PomodoroBloc
             context.read<PomodoroBloc>().add(SetUserId(state.user.id));
+            // Iniciar sincronización automática
+            context.read<SyncBloc>().add(const SyncAutoStarted());
             Navigator.of(context).pushReplacementNamed('/dashboard');
           } else if (state is Unauthenticated) {
             Navigator.of(context).pushReplacementNamed('/login');

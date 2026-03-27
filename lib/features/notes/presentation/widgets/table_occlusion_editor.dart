@@ -74,11 +74,14 @@ class _TableOcclusionEditorState extends State<TableOcclusionEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
     return Dialog(
+      insetPadding: screenWidth < 600 ? const EdgeInsets.all(16) : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       child: Container(
-        width: 900,
-        height: 700,
-        padding: const EdgeInsets.all(24),
+        width: screenWidth < 600 ? double.infinity : 900,
+        height: screenHeight < 800 ? screenHeight * 0.85 : 700,
+        padding: EdgeInsets.all(screenWidth < 600 ? 16 : 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

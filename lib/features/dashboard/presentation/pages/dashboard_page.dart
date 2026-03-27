@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -9,6 +10,9 @@ import '../../../theme/presentation/bloc/theme_event.dart';
 import '../../../theme/presentation/bloc/theme_state.dart';
 import '../bloc/dashboard_bloc.dart';
 import 'srs_stats_page.dart';
+
+/// Helper to check if running on a mobile platform
+bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -137,8 +141,12 @@ class _StatsPageState extends State<_StatsPage> {
                     notesNeedingReview: 0,
                   );
 
+            final isMobile = _isMobile;
+            final edgePadding = isMobile ? 12.0 : 16.0;
+            final sectionSpacing = isMobile ? 20.0 : 32.0;
+
             return ListView(
-                padding: const EdgeInsets.all(16),
+                padding: EdgeInsets.all(edgePadding),
                 children: [
                   // Sección de Pomodoro
                   Text(
@@ -150,7 +158,7 @@ class _StatsPageState extends State<_StatsPage> {
                   const SizedBox(height: 12),
                   const PomodoroTimerWidget(),
 
-                  const SizedBox(height: 32),
+                  SizedBox(height: sectionSpacing),
                   const Divider(),
                   const SizedBox(height: 16),
 
@@ -211,7 +219,7 @@ class _StatsPageState extends State<_StatsPage> {
                     ],
                   ),
 
-                  const SizedBox(height: 32),
+                  SizedBox(height: sectionSpacing),
                   const Divider(),
                   const SizedBox(height: 16),
 
@@ -299,7 +307,7 @@ class _StatsPageState extends State<_StatsPage> {
                     ),
                   ),
 
-                  const SizedBox(height: 32),
+                  SizedBox(height: sectionSpacing),
                   const Divider(),
                   const SizedBox(height: 16),
 
@@ -384,20 +392,24 @@ class _StatsPageState extends State<_StatsPage> {
     IconData icon,
     Color color,
   ) {
+    final isMobile = _isMobile;
     return Card(
       elevation: 2,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(isMobile ? 12 : 16),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 32),
-            const SizedBox(height: 8),
+            Icon(icon, color: color, size: isMobile ? 26 : 32),
+            SizedBox(height: isMobile ? 6 : 8),
             Text(
               value,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
+              style: (isMobile
+                      ? Theme.of(context).textTheme.titleLarge
+                      : Theme.of(context).textTheme.headlineMedium)
+                  ?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
@@ -414,7 +426,7 @@ class _StatsPageState extends State<_StatsPage> {
 
   Widget _buildWeeklyChart(BuildContext context, DashboardStatistics stats) {
     const days = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-    const maxHeight = 80.0;
+    final maxHeight = _isMobile ? 60.0 : 80.0;
 
     // Convert weekly minutes to hours (weekday 1-7 maps to index 0-6)
     final hours = List.generate(7, (index) {
@@ -434,14 +446,15 @@ class _StatsPageState extends State<_StatsPage> {
         final height = hours[index] > 0 ? (hours[index] / scale * maxHeight) : 5.0;
         final isToday = index == DateTime.now().weekday - 1;
 
+        final barWidth = _isMobile ? 24.0 : 32.0;
         return Column(
           children: [
             Container(
-              width: 32,
+              width: barWidth,
               height: maxHeight,
               alignment: Alignment.bottomCenter,
               child: Container(
-                width: 32,
+                width: barWidth,
                 height: height,
                 decoration: BoxDecoration(
                   color: isToday

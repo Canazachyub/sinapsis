@@ -1,4 +1,5 @@
 import 'package:dartz/dartz.dart';
+import 'package:uuid/uuid.dart';
 import '../../../../core/errors/exceptions.dart';
 import '../../../../core/errors/failures.dart';
 import '../../domain/entities/note.dart';
@@ -22,9 +23,9 @@ class NotesRepositoryImpl implements NotesRepository {
   }
 
   @override
-  Future<Either<Failure, List<Note>>> getNotesByCourse(String courseId) async {
+  Future<Either<Failure, List<Note>>> getNotesByCourse(String userId, String courseId) async {
     try {
-      final notes = await localDataSource.getNotesByCourse(courseId);
+      final notes = await localDataSource.getNotesByCourse(userId, courseId);
       return Right(notes.map((model) => model.toEntity()).toList());
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
@@ -52,7 +53,7 @@ class NotesRepositoryImpl implements NotesRepository {
     try {
       final now = DateTime.now();
       final note = NoteModel(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: const Uuid().v4(),
         courseId: courseId,
         userId: userId,
         title: title,

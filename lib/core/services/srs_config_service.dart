@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Configuración del algoritmo de repaso espaciado
@@ -113,7 +114,9 @@ class SRSConfig {
         easyIntervalDays == other.easyIntervalDays &&
         easeFactorDefault == other.easeFactorDefault &&
         maxReviewsPerDay == other.maxReviewsPerDay &&
-        newCardsPerDay == other.newCardsPerDay;
+        newCardsPerDay == other.newCardsPerDay &&
+        enableLeechHandling == other.enableLeechHandling &&
+        leechThreshold == other.leechThreshold;
   }
 }
 
@@ -167,36 +170,11 @@ class SRSConfigService {
     return _prefs.remove(_configKey);
   }
 
-  // Helpers para serialización simple
   Map<String, dynamic> _parseJson(String jsonString) {
-    final map = <String, dynamic>{};
-    final content = jsonString.substring(1, jsonString.length - 1);
-    final pairs = content.split(', ');
-
-    for (final pair in pairs) {
-      final colonIndex = pair.indexOf(': ');
-      if (colonIndex == -1) continue;
-
-      final key = pair.substring(0, colonIndex);
-      final value = pair.substring(colonIndex + 2);
-
-      if (value.startsWith('[')) {
-        // Parse list
-        final listContent = value.substring(1, value.length - 1);
-        map[key] = listContent.split(', ').map((e) => int.tryParse(e) ?? 0).toList();
-      } else if (value == 'true' || value == 'false') {
-        map[key] = value == 'true';
-      } else if (value.contains('.')) {
-        map[key] = double.tryParse(value) ?? 0.0;
-      } else {
-        map[key] = int.tryParse(value) ?? 0;
-      }
-    }
-    return map;
+    return Map<String, dynamic>.from(jsonDecode(jsonString));
   }
 
   String _toJsonString(Map<String, dynamic> json) {
-    final pairs = json.entries.map((e) => '${e.key}: ${e.value}').join(', ');
-    return '{$pairs}';
+    return jsonEncode(json);
   }
 }

@@ -17,12 +17,12 @@ dependencies:
   cupertino_icons: ^1.0.8
 
   # State Management
-  flutter_bloc: ^8.1.5
+  flutter_bloc: ^9.1.1
   equatable: ^2.0.5
 
   # Local Database
   drift: ^2.14.1
-  sqlite3_flutter_libs: ^0.5.20
+  sqlite3_flutter_libs: ^0.6.0+eol
   path_provider: ^2.1.2
   path: ^1.9.0
 
@@ -34,15 +34,15 @@ dependencies:
   supabase_flutter: ^2.3.4
 
   # Dependency Injection
-  get_it: ^7.6.4
+  get_it: ^9.2.1
   injectable: ^2.3.2
 
   # Code Generation
-  freezed_annotation: ^2.4.1
+  freezed_annotation: ^3.1.0
   json_annotation: ^4.8.1
 
   # Rich Text Editor
-  flutter_quill: ^9.3.20
+  flutter_quill: ">=10.0.0 <12.0.0"
 
   # Code Highlighting
   flutter_highlight: ^0.7.0
@@ -52,10 +52,10 @@ dependencies:
   cached_network_image: ^3.3.1
 
   # Utilities
-  intl: ^0.19.0
+  intl: ^0.20.2
   uuid: ^4.3.3
   shared_preferences: ^2.2.2
-  flutter_dotenv: ^5.1.0
+  flutter_dotenv: ^6.0.0
   logger: ^2.0.2+1
   dartz: ^0.10.1
 
@@ -64,37 +64,41 @@ dependencies:
   flutter_svg: ^2.0.10+1
 
   # Markdown
-  flutter_markdown: ^0.6.20
+  flutter_markdown: ^0.7.7+1
   markdown: ^7.2.1
 
   # LaTeX - Sin paquete externo por conflictos de dependencias
   # Usando renderizado custom
 
   # Clipboard
-  clipboard: ^0.1.3
-  super_clipboard: ^0.8.20          # Portapapeles avanzado multiplataforma
+  clipboard: ^3.0.14
+  super_clipboard: ^0.9.1          # Portapapeles avanzado multiplataforma
 
   # Drag & Drop
-  desktop_drop: ^0.4.4              # Drag & drop para desktop
+  desktop_drop: ^0.7.0              # Drag & drop para desktop
   image_painter: ^0.7.1
+
+  # PDF Export
+  pdf: ^3.10.8                      # Generador de PDF
+  printing: ^5.12.0                 # Impresión y vista previa PDF
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   # Linting
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
 
   # Code Generation
   build_runner: ^2.4.8
-  freezed: ^2.4.6
+  freezed: ^3.2.5
   json_serializable: ^6.7.1
   drift_dev: ^2.14.1
   injectable_generator: ^2.4.1
 
   # Testing
   mockito: ^5.4.4
-  bloc_test: ^9.1.6
+  bloc_test: ^10.0.0
 
 flutter:
   uses-material-design: true
@@ -112,3 +116,4 @@ flutter:
   #       - asset: assets/fonts/Roboto-Regular.ttf
   #       - asset: assets/fonts/Roboto-Bold.ttf
   #         weight: 700
+

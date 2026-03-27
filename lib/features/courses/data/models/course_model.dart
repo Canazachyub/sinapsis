@@ -5,7 +5,7 @@ part 'course_model.freezed.dart';
 part 'course_model.g.dart';
 
 @freezed
-class CourseModel with _$CourseModel {
+sealed class CourseModel with _$CourseModel {
   const CourseModel._();
 
   const factory CourseModel({

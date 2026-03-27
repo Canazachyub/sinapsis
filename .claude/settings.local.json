@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(timeout 5 tail:*)"
+      "Bash(timeout 5 tail:*)",
+      "Bash(flutter test test/core/ test/widget_test.dart test/features/pomodoro/)",
+      "Bash(flutter test)"
     ],
     "deny": [],
     "ask": []

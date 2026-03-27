@@ -26,7 +26,7 @@ class AppTheme {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -68,6 +68,15 @@ class AppTheme {
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         elevation: 2,
       ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 80),
+        showCloseIcon: true,
+        closeIconColor: Colors.white70,
+      ),
     );
   }
 
@@ -86,7 +95,7 @@ class AppTheme {
         elevation: 0,
         backgroundColor: Color(0xFF1E293B), // Slate 800
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 2,
         color: const Color(0xFF1E293B),
         shape: RoundedRectangleBorder(
@@ -128,6 +137,15 @@ class AppTheme {
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         elevation: 2,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 80),
+        showCloseIcon: true,
+        closeIconColor: Colors.white70,
       ),
     );
   }

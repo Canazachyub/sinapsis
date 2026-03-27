@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -86,8 +87,31 @@ class _CoursesPageState extends State<CoursesPage> {
               );
             }
 
+            final isMobile = Platform.isAndroid || Platform.isIOS;
+            final screenWidth = MediaQuery.of(context).size.width;
+            final edgePadding = isMobile ? 10.0 : 16.0;
+
+            // Use grid for wide screens (tablets/desktop)
+            if (screenWidth > 700) {
+              final crossAxisCount = screenWidth > 1100 ? 3 : 2;
+              return GridView.builder(
+                padding: EdgeInsets.all(edgePadding),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 2.8,
+                ),
+                itemCount: state.courses.length,
+                itemBuilder: (context, index) {
+                  final course = state.courses[index];
+                  return _CourseCard(course: course);
+                },
+              );
+            }
+
             return ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(edgePadding),
               itemCount: state.courses.length,
               itemBuilder: (context, index) {
                 final course = state.courses[index];

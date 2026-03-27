@@ -15,11 +15,12 @@ abstract class NotesEvent extends Equatable {
 }
 
 class LoadNotes extends NotesEvent {
+  final String userId;
   final String courseId;
-  const LoadNotes(this.courseId);
+  const LoadNotes(this.userId, this.courseId);
 
   @override
-  List<Object?> get props => [courseId];
+  List<Object?> get props => [userId, courseId];
 }
 
 class CreateNoteEvent extends NotesEvent {
@@ -51,11 +52,12 @@ class UpdateNoteEvent extends NotesEvent {
 
 class DeleteNoteEvent extends NotesEvent {
   final String id;
+  final String userId;
   final String courseId;
-  const DeleteNoteEvent(this.id, this.courseId);
+  const DeleteNoteEvent(this.id, this.userId, this.courseId);
 
   @override
-  List<Object?> get props => [id, courseId];
+  List<Object?> get props => [id, userId, courseId];
 }
 
 // States
@@ -75,6 +77,16 @@ class NotesLoaded extends NotesState {
   final String courseId;
 
   const NotesLoaded(this.notes, this.courseId);
+
+  @override
+  List<Object> get props => [notes, courseId];
+}
+
+class NotesSaving extends NotesState {
+  final List<Note> notes;
+  final String courseId;
+
+  const NotesSaving(this.notes, this.courseId);
 
   @override
   List<Object> get props => [notes, courseId];
@@ -113,7 +125,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     Emitter<NotesState> emit,
   ) async {
     emit(NotesLoading());
-    final result = await getNotesByCourse(event.courseId);
+    final result = await getNotesByCourse(event.userId, event.courseId);
     result.fold(
       (failure) => emit(NotesError(failure.message)),
       (notes) => emit(NotesLoaded(notes, event.courseId)),
@@ -124,6 +136,17 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     CreateNoteEvent event,
     Emitter<NotesState> emit,
   ) async {
+    if (event.title.trim().isEmpty) {
+      emit(const NotesError('El título no puede estar vacío'));
+      return;
+    }
+    if (event.courseId.trim().isEmpty || event.userId.trim().isEmpty) {
+      emit(const NotesError('Datos de curso o usuario inválidos'));
+      return;
+    }
+
+    _emitSaving(emit);
+
     final result = await createNote(
       courseId: event.courseId,
       userId: event.userId,
@@ -134,7 +157,7 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
 
     result.fold(
       (failure) => emit(NotesError(failure.message)),
-      (_) => add(LoadNotes(event.courseId)),
+      (_) => add(LoadNotes(event.userId, event.courseId)),
     );
   }
 
@@ -142,11 +165,18 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     UpdateNoteEvent event,
     Emitter<NotesState> emit,
   ) async {
+    if (event.note.title.trim().isEmpty) {
+      emit(const NotesError('El título no puede estar vacío'));
+      return;
+    }
+
+    _emitSaving(emit);
+
     final result = await updateNote(event.note);
 
     result.fold(
       (failure) => emit(NotesError(failure.message)),
-      (_) => add(LoadNotes(event.note.courseId)),
+      (_) => add(LoadNotes(event.note.userId, event.note.courseId)),
     );
   }
 
@@ -154,11 +184,25 @@ class NotesBloc extends Bloc<NotesEvent, NotesState> {
     DeleteNoteEvent event,
     Emitter<NotesState> emit,
   ) async {
+    if (event.id.trim().isEmpty) {
+      emit(const NotesError('ID de nota inválido'));
+      return;
+    }
+
+    _emitSaving(emit);
+
     final result = await deleteNote(event.id);
 
     result.fold(
       (failure) => emit(NotesError(failure.message)),
-      (_) => add(LoadNotes(event.courseId)),
+      (_) => add(LoadNotes(event.userId, event.courseId)),
     );
+  }
+
+  void _emitSaving(Emitter<NotesState> emit) {
+    if (state is NotesLoaded) {
+      final loaded = state as NotesLoaded;
+      emit(NotesSaving(loaded.notes, loaded.courseId));
+    }
   }
 }

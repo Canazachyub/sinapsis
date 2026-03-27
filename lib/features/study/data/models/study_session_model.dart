@@ -5,7 +5,7 @@ part 'study_session_model.freezed.dart';
 part 'study_session_model.g.dart';
 
 @freezed
-class StudyRecordModel with _$StudyRecordModel {
+sealed class StudyRecordModel with _$StudyRecordModel {
   const StudyRecordModel._();
 
   const factory StudyRecordModel({
@@ -35,7 +35,7 @@ class StudyRecordModel with _$StudyRecordModel {
 }
 
 @freezed
-class StudySessionModel with _$StudySessionModel {
+sealed class StudySessionModel with _$StudySessionModel {
   const StudySessionModel._();
 
   const factory StudySessionModel({

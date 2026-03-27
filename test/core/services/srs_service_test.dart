@@ -180,8 +180,8 @@ void main() {
       });
 
       test('estimateRetention debe retornar valor entre 0 y 1', () {
-        expect(SRSService.estimateRetention(1.3), closeTo(0.52, 0.01));
-        expect(SRSService.estimateRetention(2.5), 1.0);
+        expect(SRSService.estimateRetention(1.3), closeTo(1.3 / 3.0, 0.01));
+        expect(SRSService.estimateRetention(3.0), 1.0);
         expect(SRSService.estimateRetention(0), 0.0);
       });
     });

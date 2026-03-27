@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../domain/entities/note.dart';
@@ -7,11 +8,13 @@ import '../widgets/study_document_viewer.dart';
 /// Pantalla de modo de estudio
 /// Muestra las notas con las oclusiones ocultas y permite revelarlas
 class StudyModePage extends StatefulWidget {
+  final String userId;
   final String courseId;
   final String courseName;
 
   const StudyModePage({
     super.key,
+    required this.userId,
     required this.courseId,
     required this.courseName,
   });
@@ -28,7 +31,7 @@ class _StudyModePageState extends State<StudyModePage> {
   @override
   void initState() {
     super.initState();
-    context.read<NotesBloc>().add(LoadNotes(widget.courseId));
+    context.read<NotesBloc>().add(LoadNotes(widget.userId, widget.courseId));
   }
 
   void _nextNote(List<Note> notes) {
@@ -158,12 +161,14 @@ class _StudyModePageState extends State<StudyModePage> {
             }
 
             final currentNote = state.notes[_currentNoteIndex];
+            final isMobile = Platform.isAndroid || Platform.isIOS;
+            final hPadding = isMobile ? 8.0 : 12.0;
 
             return Column(
               children: [
                 // Barra de progreso compacta con título
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 6),
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   child: Row(
                     children: [
@@ -194,7 +199,7 @@ class _StudyModePageState extends State<StudyModePage> {
 
                 // Título compacto
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                  padding: EdgeInsets.fromLTRB(hPadding, 8, hPadding, 4),
                   child: Text(
                     currentNote.title,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -207,7 +212,7 @@ class _StudyModePageState extends State<StudyModePage> {
                 // Documento con oclusiones - más espacio
                 Expanded(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: EdgeInsets.symmetric(horizontal: isMobile ? 4 : 8, vertical: 4),
                     child: StudyDocumentViewer(
                       content: currentNote.content,
                       showOcclusions: _showAnswer,
@@ -217,7 +222,7 @@ class _StudyModePageState extends State<StudyModePage> {
 
                 // Botones de acción compactos
                 Container(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                  padding: EdgeInsets.fromLTRB(hPadding, 8, hPadding, 8),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
                     border: Border(
@@ -289,15 +294,16 @@ class _StudyModePageState extends State<StudyModePage> {
   }
 
   Widget _buildDifficultyButton(String label, Color color, VoidCallback onPressed) {
+    final isMobile = Platform.isAndroid || Platform.isIOS;
     return ElevatedButton(
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        minimumSize: const Size(0, 36),
+        padding: EdgeInsets.symmetric(vertical: isMobile ? 6 : 8),
+        minimumSize: Size(0, isMobile ? 32 : 36),
       ),
-      child: Text(label, style: const TextStyle(fontSize: 18)),
+      child: Text(label, style: TextStyle(fontSize: isMobile ? 16 : 18)),
     );
   }
 }

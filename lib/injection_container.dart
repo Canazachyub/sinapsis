@@ -7,6 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/network/network_info.dart';
 import 'core/network/dio_client.dart';
 import 'core/database/database.dart';
+import 'core/services/data_backup_service.dart';
 
 // Auth
 import 'features/auth/data/datasources/auth_local_datasource.dart';
@@ -47,6 +48,10 @@ import 'features/dashboard/presentation/bloc/dashboard_bloc.dart';
 
 // Pomodoro
 import 'features/pomodoro/data/datasources/pomodoro_datasource.dart';
+
+// Sync
+import 'core/services/sync_service.dart';
+import 'features/sync/presentation/bloc/sync_bloc.dart';
 
 // Theme
 import 'features/theme/data/theme_preferences.dart';
@@ -90,6 +95,14 @@ Future<void> init() async {
   // Dashboard - Bloc
   sl.registerFactory(
     () => DashboardBloc(sl()),
+  );
+
+  // Sync - Bloc
+  sl.registerFactory(
+    () => SyncBloc(
+      syncService: sl(),
+      networkInfo: sl(),
+    ),
   );
 
   // Theme - Bloc
@@ -183,6 +196,20 @@ Future<void> init() async {
   // Theme - Preferences
   sl.registerLazySingleton<ThemePreferences>(
     () => ThemePreferences(sl()),
+  );
+
+  // Backup Service
+  sl.registerLazySingleton<DataBackupService>(
+    () => DataBackupService(sl()),
+  );
+
+  // Sync Service
+  sl.registerLazySingleton<SyncService>(
+    () => SyncService(
+      supabaseClient: sl(),
+      database: sl(),
+      prefs: sl(),
+    ),
   );
 
   // ===== Core =====

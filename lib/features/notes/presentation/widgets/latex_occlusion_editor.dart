@@ -89,11 +89,14 @@ class _LatexOcclusionEditorState extends State<LatexOcclusionEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
     return Dialog(
+      insetPadding: screenWidth < 600 ? const EdgeInsets.all(16) : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       child: Container(
-        width: 800,
-        height: 600,
-        padding: const EdgeInsets.all(24),
+        width: screenWidth < 600 ? double.infinity : 800,
+        height: screenHeight < 700 ? screenHeight * 0.8 : 600,
+        padding: EdgeInsets.all(screenWidth < 600 ? 16 : 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

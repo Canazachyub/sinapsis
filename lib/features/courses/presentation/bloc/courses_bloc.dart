@@ -120,6 +120,15 @@ class CoursesBloc extends Bloc<CoursesEvent, CoursesState> {
     CreateCourseEvent event,
     Emitter<CoursesState> emit,
   ) async {
+    if (event.name.trim().isEmpty) {
+      emit(const CoursesError('El nombre del curso no puede estar vacío'));
+      return;
+    }
+    if (event.userId.trim().isEmpty) {
+      emit(const CoursesError('Usuario inválido'));
+      return;
+    }
+
     final result = await createCourse(
       userId: event.userId,
       name: event.name,
@@ -151,6 +160,10 @@ class CoursesBloc extends Bloc<CoursesEvent, CoursesState> {
   ) async {
     if (state is CoursesLoaded) {
       final currentState = state as CoursesLoaded;
+      if (currentState.courses.isEmpty) {
+        emit(const CoursesError('No se puede eliminar: lista de cursos vacía'));
+        return;
+      }
       final userId = currentState.courses.first.userId;
 
       final result = await deleteCourse(event.id);

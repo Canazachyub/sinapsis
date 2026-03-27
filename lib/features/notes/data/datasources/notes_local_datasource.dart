@@ -6,7 +6,7 @@ import '../models/note_model.dart';
 /// DataSource local para notas
 abstract class NotesLocalDataSource {
   Future<List<NoteModel>> getAllNotes(String userId);
-  Future<List<NoteModel>> getNotesByCourse(String courseId);
+  Future<List<NoteModel>> getNotesByCourse(String userId, String courseId);
   Future<NoteModel> getNote(String id);
   Future<void> saveNote(NoteModel note);
   Future<void> updateNote(NoteModel note);
@@ -49,12 +49,12 @@ class NotesLocalDataSourceImpl implements NotesLocalDataSource {
   }
 
   @override
-  Future<List<NoteModel>> getNotesByCourse(String courseId) async {
+  Future<List<NoteModel>> getNotesByCourse(String userId, String courseId) async {
     try {
       final notes = _getNotes();
       final courseNotes = notes.values
           .map((json) => NoteModel.fromJson(json as Map<String, dynamic>))
-          .where((note) => note.courseId == courseId)
+          .where((note) => note.courseId == courseId && note.userId == userId)
           .toList();
 
       courseNotes.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
@@ -73,6 +73,8 @@ class NotesLocalDataSourceImpl implements NotesLocalDataSource {
         throw const CacheException('Nota no encontrada');
       }
       return NoteModel.fromJson(noteJson as Map<String, dynamic>);
+    } on CacheException {
+      rethrow;
     } catch (e) {
       throw CacheException(e.toString());
     }
@@ -98,6 +100,8 @@ class NotesLocalDataSourceImpl implements NotesLocalDataSource {
       }
       notes[note.id] = note.toJson();
       await _saveNotes(notes);
+    } on CacheException {
+      rethrow;
     } catch (e) {
       throw CacheException(e.toString());
     }

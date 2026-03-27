@@ -5,7 +5,7 @@ part 'note_model.freezed.dart';
 part 'note_model.g.dart';
 
 @freezed
-class OcclusionMarkModel with _$OcclusionMarkModel {
+sealed class OcclusionMarkModel with _$OcclusionMarkModel {
   const OcclusionMarkModel._();
 
   const factory OcclusionMarkModel({
@@ -38,7 +38,7 @@ class OcclusionMarkModel with _$OcclusionMarkModel {
 }
 
 @freezed
-class ImageOcclusionModel with _$ImageOcclusionModel {
+sealed class ImageOcclusionModel with _$ImageOcclusionModel {
   const ImageOcclusionModel._();
 
   const factory ImageOcclusionModel({
@@ -80,7 +80,7 @@ class ImageOcclusionModel with _$ImageOcclusionModel {
 }
 
 @freezed
-class NoteModel with _$NoteModel {
+sealed class NoteModel with _$NoteModel {
   const NoteModel._();
 
   const factory NoteModel({

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -22,7 +23,10 @@ class _NotesPageState extends State<NotesPage> {
   @override
   void initState() {
     super.initState();
-    context.read<NotesBloc>().add(LoadNotes(widget.course.id));
+    final authState = context.read<AuthBloc>().state;
+    if (authState is Authenticated) {
+      context.read<NotesBloc>().add(LoadNotes(authState.user.id, widget.course.id));
+    }
   }
 
   @override
@@ -68,12 +72,15 @@ class _NotesPageState extends State<NotesPage> {
           IconButton(
             icon: const Icon(Icons.play_circle_outline),
             onPressed: () {
+              final authState = context.read<AuthBloc>().state;
+              if (authState is! Authenticated) return;
               Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => BlocProvider.value(
                     value: context.read<NotesBloc>(),
                     child: StudyModePage(
+                      userId: authState.user.id,
                       courseId: widget.course.id,
                       courseName: widget.course.name,
                     ),
@@ -131,8 +138,35 @@ class _NotesPageState extends State<NotesPage> {
               );
             }
 
+            final isMobile = Platform.isAndroid || Platform.isIOS;
+            final screenWidth = MediaQuery.of(context).size.width;
+            final edgePadding = isMobile ? 10.0 : 16.0;
+
+            // Use grid for wide screens (tablets/desktop)
+            if (screenWidth > 700) {
+              final crossAxisCount = screenWidth > 1100 ? 3 : 2;
+              return GridView.builder(
+                padding: EdgeInsets.all(edgePadding),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 2.5,
+                ),
+                itemCount: state.notes.length,
+                itemBuilder: (context, index) {
+                  final note = state.notes[index];
+                  return _NoteCard(
+                    note: note,
+                    onTap: () => _showNoteEditor(note: note),
+                    onDelete: () => _deleteNote(note.id),
+                  );
+                },
+              );
+            }
+
             return ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(edgePadding),
               itemCount: state.notes.length,
               itemBuilder: (context, index) {
                 final note = state.notes[index];
@@ -174,6 +208,9 @@ class _NotesPageState extends State<NotesPage> {
   }
 
   void _deleteNote(String noteId) {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! Authenticated) return;
+
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -187,7 +224,7 @@ class _NotesPageState extends State<NotesPage> {
           FilledButton(
             onPressed: () {
               context.read<NotesBloc>().add(
-                    DeleteNoteEvent(noteId, widget.course.id),
+                    DeleteNoteEvent(noteId, authState.user.id, widget.course.id),
                   );
               Navigator.pop(dialogContext);
             },

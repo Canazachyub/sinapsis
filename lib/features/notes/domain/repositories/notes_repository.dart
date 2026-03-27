@@ -4,7 +4,7 @@ import '../entities/note.dart';
 
 abstract class NotesRepository {
   Future<Either<Failure, List<Note>>> getAllNotes(String userId);
-  Future<Either<Failure, List<Note>>> getNotesByCourse(String courseId);
+  Future<Either<Failure, List<Note>>> getNotesByCourse(String userId, String courseId);
   Future<Either<Failure, Note>> getNote(String id);
   Future<Either<Failure, Note>> createNote({
     required String courseId,

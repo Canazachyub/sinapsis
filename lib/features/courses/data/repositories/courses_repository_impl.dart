@@ -1,4 +1,5 @@
 import 'package:dartz/dartz.dart';
+import 'package:uuid/uuid.dart';
 import '../../../../core/errors/exceptions.dart';
 import '../../../../core/errors/failures.dart';
 import '../../domain/entities/course.dart';
@@ -41,7 +42,7 @@ class CoursesRepositoryImpl implements CoursesRepository {
     try {
       final now = DateTime.now();
       final course = CourseModel(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: const Uuid().v4(),
         userId: userId,
         name: name,
         description: description,

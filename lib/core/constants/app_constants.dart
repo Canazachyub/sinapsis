@@ -6,7 +6,7 @@ class AppConstants {
 
   // Database
   static const String dbName = 'sinapsis.db';
-  static const int dbVersion = 1;
+  static const int dbVersion = 3;
 
   // Pagination
   static const int defaultPageSize = 20;

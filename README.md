@@ -18,9 +18,11 @@ Aplicación multiplataforma de estudio con flashcards, oclusiones de imagen, edi
 8. [Sistema de Oclusiones](#sistema-de-oclusiones)
 9. [Sistema SRS](#sistema-srs-spaced-repetition-system)
 10. [Pomodoro Timer](#pomodoro-timer)
-11. [Instalación y Desarrollo](#instalación-y-desarrollo)
-12. [Compilación](#compilación)
-13. [Guía de Modificación](#guía-de-modificación)
+11. [Backup y Migración de Datos](#backup-y-migración-de-datos)
+12. [Instalación y Desarrollo](#instalación-y-desarrollo)
+13. [Compilación](#compilación)
+14. [Tests](#tests)
+15. [Guía de Modificación](#guía-de-modificación)
 
 ---
 
@@ -29,6 +31,7 @@ Aplicación multiplataforma de estudio con flashcards, oclusiones de imagen, edi
 | Característica | Descripción |
 |----------------|-------------|
 | **Editor Rico** | Editor de texto con fuentes, tamaños, colores, alineación, listas, código, LaTeX |
+| **Exportar PDF** | Exporta documentos a PDF para impresión con opciones de formato |
 | **Oclusiones de Imagen** | Marca zonas en imágenes para ocultar durante el estudio |
 | **Oclusiones de Texto** | Oculta partes del texto para crear tests de tipo cloze |
 | **Oclusiones de Tablas** | Oculta celdas específicas de tablas |
@@ -37,6 +40,7 @@ Aplicación multiplataforma de estudio con flashcards, oclusiones de imagen, edi
 | **Pomodoro Timer** | Temporizador flotante y arrastrable |
 | **Gestión de Cursos** | Organiza notas por cursos con colores personalizados |
 | **Modo Offline** | Funciona sin conexión con base de datos local SQLite |
+| **Backup Local** | Exporta/importa datos como JSON para migrar entre dispositivos |
 | **Sincronización** | Opcional con Supabase para múltiples dispositivos |
 | **Multiplataforma** | Windows, Linux, Android |
 
@@ -63,9 +67,11 @@ Inyección:        get_it + injectable
 | `flutter_quill` | Editor de texto enriquecido |
 | `supabase_flutter` | Backend y autenticación |
 | `get_it` | Inyección de dependencias |
+| `uuid` | Generación de IDs únicos |
 | `cached_network_image` | Caché de imágenes |
 | `image_picker` | Selección de imágenes |
 | `flutter_markdown` | Renderizado de Markdown |
+| `pdf` + `printing` | Generación y exportación de PDF |
 
 ---
 
@@ -122,7 +128,8 @@ lib/
 │   ├── network/                # Cliente HTTP (Dio)
 │   ├── services/               # Servicios globales
 │   │   ├── srs_service.dart    # Algoritmo SM-2
-│   │   └── srs_config_service.dart # Configuración SRS
+│   │   ├── srs_config_service.dart # Configuración SRS
+│   │   └── data_backup_service.dart # Export/import de datos
 │   ├── theme/                  # Temas (light/dark)
 │   └── utils/                  # Utilidades generales
 │
@@ -300,6 +307,7 @@ CREATE TABLE pomodoro_sessions (
 | **Insertar tabla** | Tablas con oclusiones |
 | **Pegar Markdown** | Importar desde clipboard |
 | **Editar oclusiones** | Modificar oclusiones existentes |
+| **Exportar PDF** | Genera PDF para impresión/compartir |
 
 #### Configuración del Editor
 
@@ -468,6 +476,51 @@ builder: (context, child) {
 
 ---
 
+## Backup y Migración de Datos
+
+**Archivo:** `lib/core/services/data_backup_service.dart`
+
+Sinapsis incluye un sistema de backup local para exportar e importar todos los datos del usuario como un archivo JSON.
+
+### Exportar Datos
+
+```dart
+final backupService = sl<DataBackupService>();
+
+// Exportar a un Map
+final data = backupService.exportData(userId);
+
+// Exportar a archivo
+final file = await backupService.exportToFile(userId, '/ruta/backup.json');
+```
+
+El archivo exportado incluye:
+- Todos los cursos del usuario
+- Todas las notas con su contenido Delta JSON
+- Configuración SRS personalizada
+- Metadatos (versión, fecha, contadores)
+
+### Importar Datos
+
+```dart
+// Importar con merge (agrega sin borrar datos existentes)
+final result = await backupService.importFromFile('/ruta/backup.json', merge: true);
+
+// Importar reemplazando datos existentes
+final result = await backupService.importFromFile('/ruta/backup.json', merge: false);
+
+print(result.message); // "Importados 5 cursos y 23 notas"
+```
+
+### Caso de Uso
+
+Ideal para:
+- Migrar datos entre dispositivos sin necesitar servidor
+- Crear respaldos manuales antes de actualizar
+- Compartir conjuntos de notas entre usuarios
+
+---
+
 ## Instalación y Desarrollo
 
 ### Requisitos
@@ -519,16 +572,35 @@ SUPABASE_ANON_KEY=tu-anon-key
 
 ### Windows (GitHub Actions - Automático)
 
+El workflow genera automáticamente dos artefactos en cada push a `main`:
+
+1. **ZIP portable** — `sinapsis-windows.zip` (ejecutar sin instalar)
+2. **Instalador** — `Sinapsis_Setup_v1.0.0.exe` (Inno Setup, con acceso directo y desinstalador)
+
 ```bash
 # Push a main dispara el build automáticamente
-git add -A
-git commit -m "feat: nueva característica"
 git push origin main
 
 # Descargar desde:
 # https://github.com/Canazachyub/sinapsis/actions
-# → Artifacts → sinapsis-windows-release.zip
+# → Artifacts → sinapsis-windows-zip o sinapsis-windows-installer
 ```
+
+#### Crear un Release con Instalador
+
+```bash
+# Crear tag y push para generar un GitHub Release
+git tag v1.0.0
+git push origin v1.0.0
+# → Se crea un Release con el ZIP y el .exe adjuntos
+```
+
+El instalador (`installer/sinapsis_installer.iss`) incluye:
+- Instalación en `Archivos de Programa` con permisos mínimos
+- Acceso directo en escritorio y menú inicio
+- Desinstalador integrado
+- Verificación de Visual C++ Redistributable
+- Soporte para español e inglés
 
 ### Windows (Manual)
 
@@ -541,6 +613,10 @@ flutter build windows --release
 
 # El ejecutable estará en:
 # build\windows\x64\runner\Release\sinapsis.exe
+
+# Opción 3: Generar instalador (requiere Inno Setup 6)
+# Compilar primero con flutter build windows --release
+# Luego abrir installer\sinapsis_installer.iss con Inno Setup y compilar
 ```
 
 ### Linux
@@ -652,11 +728,15 @@ class MiNuevaTabla extends Table {
 | `lib/injection_container.dart` | Inyección de dependencias |
 | `lib/core/database/database.dart` | Esquema de base de datos |
 | `lib/core/services/srs_service.dart` | Algoritmo de repetición espaciada |
+| `lib/core/services/data_backup_service.dart` | Export/import de datos locales |
 | `lib/features/notes/presentation/widgets/rich_document_editor.dart` | Editor de texto principal |
 | `lib/features/notes/presentation/widgets/image_occlusion_editor.dart` | Editor de oclusiones de imagen |
 | `lib/features/notes/presentation/widgets/study_document_viewer.dart` | Visor de modo estudio |
 | `lib/features/pomodoro/presentation/widgets/floating_pomodoro_widget.dart` | Timer Pomodoro |
 | `pubspec.yaml` | Dependencias del proyecto |
+| `installer/sinapsis_installer.iss` | Script Inno Setup para instalador Windows |
+| `.github/workflows/build-windows.yml` | CI/CD: build + tests + instalador Windows |
+| `.github/workflows/build-linux.yml` | CI/CD: build Linux |
 
 ---
 
@@ -684,18 +764,33 @@ localizationsDelegates: const [
 ## Tests
 
 ```bash
-# Ejecutar todos los tests
+# Ejecutar todos los tests (225 tests)
 flutter test
 
 # Tests específicos
 flutter test test/core/services/srs_service_test.dart
-flutter test test/features/pomodoro/
+flutter test test/features/notes/
+flutter test test/features/courses/
 ```
 
-**Tests disponibles:**
-- `test/core/services/srs_service_test.dart` - 14 tests del algoritmo SRS
-- `test/core/services/srs_config_service_test.dart` - 12 tests de configuración
-- `test/features/pomodoro/floating_pomodoro_widget_test.dart` - 15 tests del timer
+**225 tests cubriendo:**
+
+| Suite | Archivo | Tests |
+|-------|---------|-------|
+| SRS Algorithm | `test/core/services/srs_service_test.dart` | 14 |
+| SRS Config | `test/core/services/srs_config_service_test.dart` | 12 |
+| SRS Edge Cases | `test/core/services/srs_service_edge_cases_test.dart` | — |
+| SRS Config Edge Cases | `test/core/services/srs_config_service_edge_cases_test.dart` | — |
+| Image Constants | `test/core/constants/image_constants_test.dart` | — |
+| App Constants | `test/core/constants/app_constants_test.dart` | — |
+| Pomodoro Widget | `test/features/pomodoro/floating_pomodoro_widget_test.dart` | 15 |
+| Notes BLoC | `test/features/notes/presentation/bloc/notes_bloc_test.dart` | — |
+| Notes UseCases | `test/features/notes/domain/usecases/notes_usecases_test.dart` | — |
+| Notes Repository | `test/features/notes/data/repositories/notes_repository_impl_test.dart` | — |
+| Courses BLoC | `test/features/courses/presentation/bloc/courses_bloc_test.dart` | — |
+| Auth BLoC | `test/features/auth/presentation/bloc/auth_bloc_test.dart` | — |
+
+Los tests se ejecutan automáticamente en el CI de GitHub Actions antes de generar los builds.
 
 ---
 
@@ -714,5 +809,5 @@ MIT License - Ver archivo LICENSE
 
 ---
 
-**Última actualización:** 2025-12-19
+**Última actualización:** 2026-03-05
 **Versión:** 1.0.0

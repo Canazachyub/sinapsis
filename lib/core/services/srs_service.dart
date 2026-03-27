@@ -10,7 +10,7 @@
 class SRSService {
   // Constantes del algoritmo SM-2
   static const double minEaseFactor = 1.3;
-  static const double maxEaseFactor = 2.5;
+  static const double maxEaseFactor = 3.0;
   static const double easeFactorDefault = 2.5;
 
   // Intervalos de aprendizaje inicial (en minutos)

@@ -27,8 +27,10 @@ class Courses extends Table {
   TextColumn get description => text().nullable()();
   TextColumn get color => text().withDefault(const Constant('#6366F1'))();
   BoolColumn get isFavorite => boolean().withDefault(const Constant(false))();
+  BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
+  DateTimeColumn get syncedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -51,8 +53,10 @@ class Notes extends Table {
   RealColumn get easeFactor => real().withDefault(const Constant(2.5))(); // Factor de facilidad (SM-2)
   IntColumn get consecutiveCorrect => integer().withDefault(const Constant(0))(); // Respuestas correctas consecutivas
   TextColumn get srsState => text().withDefault(const Constant('new'))(); // new, learning, review, relearning
+  BoolColumn get isDeleted => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
+  DateTimeColumn get syncedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -70,6 +74,7 @@ class StudySessions extends Table {
   DateTimeColumn get endedAt => dateTime().nullable()();
   TextColumn get sessionType => text().withDefault(const Constant('review'))(); // review, pomodoro, practice
   TextColumn get noteId => text().nullable()(); // Nota específica si aplica
+  DateTimeColumn get syncedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -87,6 +92,7 @@ class PomodoroSessions extends Table {
   BoolColumn get wasInterrupted => boolean().withDefault(const Constant(false))();
   DateTimeColumn get startedAt => dateTime()();
   DateTimeColumn get completedAt => dateTime().nullable()();
+  DateTimeColumn get syncedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -97,7 +103,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -145,6 +151,28 @@ class AppDatabase extends _$AppDatabase {
           );
           await customStatement(
             'ALTER TABLE notes ADD COLUMN srs_state TEXT NOT NULL DEFAULT \'new\''
+          );
+        }
+
+        if (from < 4) {
+          // Migración de v3 a v4: agregar columnas de sincronización
+          await customStatement(
+            'ALTER TABLE courses ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0'
+          );
+          await customStatement(
+            'ALTER TABLE courses ADD COLUMN synced_at INTEGER'
+          );
+          await customStatement(
+            'ALTER TABLE notes ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0'
+          );
+          await customStatement(
+            'ALTER TABLE notes ADD COLUMN synced_at INTEGER'
+          );
+          await customStatement(
+            'ALTER TABLE study_sessions ADD COLUMN synced_at INTEGER'
+          );
+          await customStatement(
+            'ALTER TABLE pomodoro_sessions ADD COLUMN synced_at INTEGER'
           );
         }
       },

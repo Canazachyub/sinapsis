@@ -8,7 +8,7 @@ class GetNotesByCourse {
 
   GetNotesByCourse(this.repository);
 
-  Future<Either<Failure, List<Note>>> call(String courseId) async {
-    return await repository.getNotesByCourse(courseId);
+  Future<Either<Failure, List<Note>>> call(String userId, String courseId) async {
+    return await repository.getNotesByCourse(userId, courseId);
   }
 }
