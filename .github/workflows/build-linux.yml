@@ -30,7 +30,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.1'
+          flutter-version: '3.41.6'
           channel: 'stable'
 
       - name: Flutter Doctor
@@ -38,10 +38,10 @@ jobs:
 
       - name: Create .env file
         run: |
-          echo "SUPABASE_URL=https://placeholder.supabase.co" > .env
-          echo "SUPABASE_ANON_KEY=placeholder-anon-key" >> .env
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" > .env
+          echo "SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}" >> .env
           echo "SENTRY_DSN=https://placeholder-sentry-dsn" >> .env
-          echo "APP_ENV=demo" >> .env
+          echo "APP_ENV=production" >> .env
 
       - name: Create assets directories
         run: |
