@@ -71,7 +71,6 @@ dependencies:
   # Usando renderizado custom
 
   # Clipboard
-  clipboard: ^3.0.14
   super_clipboard: ^0.9.1          # Portapapeles avanzado multiplataforma
 
   # Drag & Drop
