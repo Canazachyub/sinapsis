@@ -1,0 +1,57 @@
+# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+
+# Flutter build outputs
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.iml
+
+# Generated files
+*.g.dart
+*.freezed.dart
+*.gr.dart
+*.mocks.dart
+
+# Dependencies
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Platform specific build folders
+android/.gradle/
+android/app/build/
+android/build/
+ios/.symlinks/
+ios/Pods/
+ios/.generated/
+ios/Flutter/flutter_export_environment.sh
+ios/Runner.xcworkspace/
+ios/Runner.xcodeproj/
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+macos/flutter/ephemeral/
+web/.dart_tool/
+
+# Coverage
+coverage/
+*.lcov
+
+# Test outputs
+test_driver/
+test/.dart_tool/

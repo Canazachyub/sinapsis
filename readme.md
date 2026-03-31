@@ -1,684 +1,718 @@
-# 🧠 Sinapsis - Sistema Integral de Estudio y Repaso Activo
+# Sinapsis
 
-<div align="center">
+**Sistema Integral de Estudio y Repaso Activo**
 
-![Flutter](https://img.shields.io/badge/Flutter-3.24.5-02569B?logo=flutter)
-![Dart](https://img.shields.io/badge/Dart-3.5.0-0175C2?logo=dart)
-![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Android%20%7C%20Web-brightgreen)
-![License](https://img.shields.io/badge/License-MIT-blue)
-
-**Aplicación multiplataforma de estudio activo basada en técnicas de memorización comprobadas**
-
-[🚀 Características](#características) • [📦 Instalación](#instalación) • [🏗️ Arquitectura](#arquitectura) • [📖 Documentación](#documentación)
-
-</div>
+Aplicación multiplataforma de estudio con flashcards, oclusiones de imagen, editor de texto enriquecido, sistema de repetición espaciada (SRS) y temporizador Pomodoro.
 
 ---
 
-## 📋 Tabla de Contenidos
+## Tabla de Contenidos
 
-- [Descripción](#descripción)
-- [Características](#características)
-- [Capturas de Pantalla](#capturas-de-pantalla)
-- [Stack Tecnológico](#stack-tecnológico)
-- [Requisitos Previos](#requisitos-previos)
-- [Instalación](#instalación)
-- [Configuración](#configuración)
-- [Estructura del Proyecto](#estructura-del-proyecto)
-- [Arquitectura](#arquitectura)
-- [Scripts Disponibles](#scripts-disponibles)
-- [Testing](#testing)
-- [Despliegue](#despliegue)
-- [Contribución](#contribución)
-- [Roadmap](#roadmap)
-- [Licencia](#licencia)
+1. [Características Principales](#características-principales)
+2. [Tecnologías](#tecnologías)
+3. [Arquitectura del Proyecto](#arquitectura-del-proyecto)
+4. [Estructura de Carpetas](#estructura-de-carpetas)
+5. [Base de Datos](#base-de-datos)
+6. [Features Detalladas](#features-detalladas)
+7. [Editor de Texto Enriquecido](#editor-de-texto-enriquecido)
+8. [Sistema de Oclusiones](#sistema-de-oclusiones)
+9. [Sistema SRS](#sistema-srs-spaced-repetition-system)
+10. [Pomodoro Timer](#pomodoro-timer)
+11. [Instalación y Desarrollo](#instalación-y-desarrollo)
+12. [Compilación](#compilación)
+13. [Guía de Modificación](#guía-de-modificación)
 
 ---
 
-## 📝 Descripción
+## Características Principales
 
-**Sinapsis** es una aplicación de escritorio y móvil diseñada para facilitar el estudio activo mediante técnicas de memorización comprobadas científicamente. Inspirada en sistemas como Anki y Quizlet, pero con una interfaz moderna y capacidades de colaboración en tiempo real.
-
-### ¿Qué es Sinapsis?
-
-Sinapsis permite a estudiantes, educadores y profesionales:
-
-- 📚 **Organizar conocimiento** en cursos y notas estructuradas
-- 🧠 **Memorizar eficientemente** con flashcards, cloze tests, y image occlusion
-- 🔄 **Sincronizar en tiempo real** entre múltiples dispositivos
-- 👥 **Colaborar** con otros usuarios en cursos compartidos
-- 📊 **Seguir progreso** con estadísticas de sesiones de estudio
-- 💾 **Trabajar offline** con sincronización automática al reconectar
-
----
-
-## ✨ Características
-
-### 🎯 Funcionalidades Principales
-
-#### 📝 5 Tipos de Notas
-
-1. **Flashcards Tradicionales**
-   - Pregunta (frente) y respuesta (reverso)
-   - Ideal para definiciones, vocabulario, conceptos
-
-2. **Cloze Tests (Rellenar espacios)**
-   - Texto con espacios en blanco: `El corazón tiene {{c1::4}} cámaras`
-   - Perfecto para memorizar datos específicos en contexto
-
-3. **Image Occlusion**
-   - Ocultar zonas de imágenes (mapas, anatomía, diagramas)
-   - Interactivo: revelar zonas al hacer clic
-
-4. **Code Blocks**
-   - Código con resaltado de sintaxis (30+ lenguajes)
-   - Botón de copiar al portapapeles
-   - Ideal para estudiantes de programación
-
-5. **Notas Multimedia**
-   - Texto enriquecido, imágenes, videos, enlaces
-   - Soporte para LaTeX: `$E=mc^2$`
-   - Tablas, listas, formato avanzado
-
-#### 🎮 Modos de Estudio
-
-- **Secuencial:** Orden cronológico o temático
-- **Aleatorio:** Mezcla de tarjetas para reforzar memoria
-- **Filtrado:** Por tags, dificultad, o estado de repaso
-- **Autoevaluación:** Fácil / Difícil / Dominado
-
-#### 🔄 Sincronización Inteligente
-
-- Sincronización automática en tiempo real
-- Modo offline completo con sincronización diferida
-- Resolución automática de conflictos
-
-#### 👥 Colaboración
-
-- Compartir cursos con link o código de 6 dígitos
-- Roles: Administrador, Editor, Lector
-- Edición colaborativa (próximamente)
-
-#### 📤 Importación/Exportación
-
-- Exportar a JSON, CSV, Markdown
-- Importar desde Anki (.apkg)
-- Backup automático de datos
+| Característica | Descripción |
+|----------------|-------------|
+| **Editor Rico** | Editor de texto con fuentes, tamaños, colores, alineación, listas, código, LaTeX |
+| **Oclusiones de Imagen** | Marca zonas en imágenes para ocultar durante el estudio |
+| **Oclusiones de Texto** | Oculta partes del texto para crear tests de tipo cloze |
+| **Oclusiones de Tablas** | Oculta celdas específicas de tablas |
+| **Oclusiones LaTeX** | Oculta partes de fórmulas matemáticas |
+| **Sistema SRS** | Algoritmo SM-2 (igual que Anki) para optimizar el repaso |
+| **Pomodoro Timer** | Temporizador flotante y arrastrable |
+| **Gestión de Cursos** | Organiza notas por cursos con colores personalizados |
+| **Modo Offline** | Funciona sin conexión con base de datos local SQLite |
+| **Sincronización** | Opcional con Supabase para múltiples dispositivos |
+| **Multiplataforma** | Windows, Linux, Android |
 
 ---
 
-## 📸 Capturas de Pantalla
+## Tecnologías
 
+```yaml
+Framework:        Flutter 3.27.1+
+Lenguaje:         Dart 3.5.0+
+Estado:           flutter_bloc (BLoC Pattern)
+Base de Datos:    Drift (SQLite)
+Backend:          Supabase (opcional)
+Editor:           flutter_quill
+Inyección:        get_it + injectable
 ```
-┌────────────────────────────────────────────────────────────┐
-│  [AQUÍ IRÁ SCREENSHOT DEL DASHBOARD]                       │
-│  Dashboard con lista de cursos    IMAGINALO Y CREALO                          │
-└────────────────────────────────────────────────────────────┘
 
-┌────────────────────────────────────────────────────────────┐
-│  [AQUÍ IRÁ SCREENSHOT DEL MODO ESTUDIO]                    │
-│  Flashcard en modo de estudio   IMAGINALO Y CREALO                            │
-└────────────────────────────────────────────────────────────┘
+### Dependencias Principales
 
-┌────────────────────────────────────────────────────────────┐
-│  [AQUÍ IRÁ SCREENSHOT DEL EDITOR DE NOTAS]                 │
-│  Editor de Cloze Tests   IMAGINALO Y CREALO                       │
-└────────────────────────────────────────────────────────────┘
-```
+| Paquete | Uso |
+|---------|-----|
+| `flutter_bloc` | Gestión de estado con patrón BLoC |
+| `drift` | ORM para SQLite |
+| `flutter_quill` | Editor de texto enriquecido |
+| `supabase_flutter` | Backend y autenticación |
+| `get_it` | Inyección de dependencias |
+| `cached_network_image` | Caché de imágenes |
+| `image_picker` | Selección de imágenes |
+| `flutter_markdown` | Renderizado de Markdown |
 
 ---
 
-## 🛠️ Stack Tecnológico
+## Arquitectura del Proyecto
 
-### Frontend
-
-| Tecnología | Versión | Propósito |
-|------------|---------|-----------|
-| **Flutter** | 3.24.5 | Framework multiplataforma |
-| **Dart** | 3.5.0+ | Lenguaje de programación |
-| **flutter_bloc** | ^8.1.5 | State management (BLoC pattern) |
-| **drift** | ^2.14.1 | Base de datos local (SQLite) |
-| **dio** | ^5.4.0 | Cliente HTTP |
-| **get_it** | ^7.6.4 | Dependency injection |
-| **freezed** | ^2.4.6 | Generación de modelos inmutables |
-| **flutter_quill** | ^9.3.0 | Editor de texto enriquecido |
-| **flutter_highlight** | ^0.7.0 | Resaltado de sintaxis |
-
-### Backend (Supabase)
-
-| Servicio | Propósito |
-|----------|-----------|
-| **PostgreSQL** | Base de datos relacional |
-| **Supabase Auth** | Autenticación JWT |
-| **Supabase Storage** | Almacenamiento de imágenes |
-| **Supabase Realtime** | Sincronización en tiempo real |
-
-### DevOps
-
-- **GitHub Actions:** CI/CD
-- **Sentry:** Error tracking
-- **Flutter Analyze:** Linting
-- **Flutter Test:** Testing unitario y de widgets
-
----
-
-## 📋 Requisitos Previos
-
-### Desarrollo
-
-- **Flutter SDK:** 3.24.5 o superior
-- **Dart SDK:** 3.5.0 o superior
-- **Git:** Control de versiones
-- **VS Code** o **Android Studio**
-
-### Linux (Desarrollo Desktop)
-
-```bash
-# Ubuntu/Debian
-sudo apt-get install clang cmake ninja-build pkg-config libgtk-3-dev
-
-# Fedora
-sudo dnf install clang cmake ninja-build gtk3-devel
-
-# Arch
-sudo pacman -S clang cmake ninja gtk3
-```
-
-### Android (Desarrollo Móvil)
-
-- Android SDK 21+
-- Android Studio 2024.1+
-- JDK 11+
-
-### Web (Desarrollo Web)
-
-- Chrome o Edge (para debugging)
-
----
-
-## 📦 Instalación
-
-### 1. Clonar el repositorio
-
-```bash
-git clone https://github.com/tu-usuario/sinapsis.git
-cd sinapsis
-```
-
-### 2. Instalar dependencias
-
-```bash
-flutter pub get
-```
-
-### 3. Generar código (Freezed, JSON Serializable)
-
-```bash
-flutter pub run build_runner build --delete-conflicting-outputs
-```
-
-### 4. Configurar variables de entorno
-
-Crea un archivo `.env` en la raíz del proyecto:
-
-```env
-# Supabase
-SUPABASE_URL=https://tu-proyecto.supabase.co
-SUPABASE_ANON_KEY=tu-anon-key-aqui
-
-# Sentry (opcional)
-SENTRY_DSN=https://tu-sentry-dsn
-
-# Otros
-APP_ENV=development
-```
-
-### 5. Ejecutar la aplicación
-
-#### Linux Desktop
-
-```bash
-flutter run -d linux
-```
-
-#### Android
-
-```bash
-flutter run -d android
-```
-
-#### Web
-
-```bash
-flutter run -d chrome
-```
-
----
-
-## ⚙️ Configuración
-
-### Supabase Setup
-
-1. Crea una cuenta en [Supabase](https://supabase.com)
-2. Crea un nuevo proyecto
-3. Ejecuta las migraciones SQL (disponibles en `supabase/migrations/`)
-4. Copia tu `SUPABASE_URL` y `SUPABASE_ANON_KEY` al archivo `.env`
-
-### Base de Datos Local
-
-La aplicación usa Drift (SQLite) para almacenamiento local. La base de datos se crea automáticamente en:
-
-- **Linux:** `~/.local/share/sinapsis/sinapsis.db`
-- **Android:** `/data/data/com.sinapsis.app/databases/sinapsis.db`
-
----
-
-## 📁 Estructura del Proyecto
+El proyecto sigue **Clean Architecture** con el patrón **BLoC** para la gestión de estado.
 
 ```
-sinapsis/
-├── lib/
-│   ├── main.dart                      # Punto de entrada
-│   ├── app.dart                       # App principal con routing
-│   │
-│   ├── core/                          # Funcionalidades compartidas
-│   │   ├── constants/                 # Constantes de la app
-│   │   ├── theme/                     # Temas (claro/oscuro)
-│   │   ├── utils/                     # Utilidades (validators, logger)
-│   │   ├── errors/                    # Manejo de errores
-│   │   └── network/                   # Configuración de red
-│   │
-│   ├── features/                      # Features por dominio
-│   │   ├── auth/                      # Autenticación
-│   │   │   ├── data/
-│   │   │   │   ├── models/            # Modelos de datos
-│   │   │   │   ├── datasources/       # Local/Remote datasources
-│   │   │   │   └── repositories/      # Implementación de repos
-│   │   │   ├── domain/
-│   │   │   │   ├── entities/          # Entidades de negocio
-│   │   │   │   ├── repositories/      # Contratos de repos
-│   │   │   │   └── usecases/          # Casos de uso
-│   │   │   └── presentation/
-│   │   │       ├── bloc/              # BLoC (estado)
-│   │   │       ├── pages/             # Pantallas
-│   │   │       └── widgets/           # Componentes UI
-│   │   │
-│   │   ├── courses/                   # Gestión de cursos
-│   │   ├── notes/                     # Gestión de notas
-│   │   ├── study/                     # Modo de estudio
-│   │   └── sync/                      # Sincronización
-│   │
-│   └── injection_container.dart       # Dependency Injection (GetIt)
-│
-├── test/
-│   ├── unit/                          # Tests unitarios
-│   ├── widget/                        # Tests de widgets
-│   └── integration/                   # Tests de integración
-│
-├── assets/
-│   ├── images/                        # Imágenes de la app
-│   ├── icons/                         # Iconos
-│   └── fonts/                         # Fuentes personalizadas
-│
-├── supabase/
-│   └── migrations/                    # Migraciones SQL
-│
-├── .github/
-│   └── workflows/                     # CI/CD con GitHub Actions
-│
-├── pubspec.yaml                       # Dependencias
-├── analysis_options.yaml              # Reglas de linting
-├── .env                               # Variables de entorno
-└── README.md                          # Este archivo
-```
-
----
-
-## 🏗️ Arquitectura
-
-Sinapsis sigue **Clean Architecture** con el patrón **BLoC** para el manejo de estado.
-
-### Capas de la Arquitectura
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  PRESENTATION LAYER (UI)                     │
-│  - Screens (Pages)                                          │
-│  - Widgets (Components)                                     │
-│  - BLoC (State Management)                                  │
-└─────────────────────────────────────────────────────────────┘
-                           ↕
-┌─────────────────────────────────────────────────────────────┐
-│                     DOMAIN LAYER                             │
-│  - Entities (User, Course, Note)                            │
-│  - Repository Interfaces                                    │
-│  - Use Cases (Login, CreateCourse, GetNotes)               │
-└─────────────────────────────────────────────────────────────┘
-                           ↕
-┌─────────────────────────────────────────────────────────────┐
-│                      DATA LAYER                              │
-│  - Models (Data Transfer Objects)                           │
-│  - Repository Implementations                               │
-│  - Data Sources (Local: Drift, Remote: Supabase)           │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                      PRESENTATION LAYER                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │   Pages     │  │   Widgets   │  │         BLoCs           │ │
+│  │  (Screens)  │  │ (Components)│  │ (State Management)      │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                        DOMAIN LAYER                             │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │  Entities   │  │  Use Cases  │  │  Repository Interfaces  │ │
+│  │  (Models)   │  │  (Business) │  │      (Contracts)        │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│                         DATA LAYER                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │   Models    │  │Repositories │  │      DataSources        │ │
+│  │   (DTOs)    │  │  (Impl)     │  │  (Local/Remote)         │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Flujo de Datos
 
-1. **UI** dispara un **Event** al **BLoC**
-2. **BLoC** ejecuta un **Use Case**
-3. **Use Case** llama al **Repository**
-4. **Repository** obtiene datos del **Data Source** (local o remoto)
-5. **Data Source** retorna **Models** que se convierten en **Entities**
-6. **BLoC** emite un nuevo **State**
-7. **UI** se actualiza reactivamente
-
-### Dependency Injection
-
-Usamos **GetIt** para inyección de dependencias:
-
-```dart
-// injection_container.dart
-final sl = GetIt.instance;
-
-Future<void> init() async {
-  // BLoCs
-  sl.registerFactory(() => AuthBloc(login: sl(), register: sl()));
-  
-  // Use Cases
-  sl.registerLazySingleton(() => Login(sl()));
-  
-  // Repositories
-  sl.registerLazySingleton<AuthRepository>(
-    () => AuthRepositoryImpl(localDataSource: sl(), remoteDataSource: sl()),
-  );
-  
-  // Data Sources
-  sl.registerLazySingleton<AuthRemoteDataSource>(
-    () => SupabaseAuthDataSource(client: sl()),
-  );
-}
+```
+UI Event → BLoC → UseCase → Repository → DataSource → Database/API
+                                    ↓
+UI Update ← BLoC ← Entity ← Repository ← Model ←──────┘
 ```
 
 ---
 
-## 📜 Scripts Disponibles
+## Estructura de Carpetas
 
-### Desarrollo
-
-```bash
-# Ejecutar en modo debug
-flutter run
-
-# Hot reload (automático al guardar)
-# Presiona 'r' en la terminal
-
-# Limpiar build
-flutter clean
+```
+lib/
+├── main.dart                    # Entry point
+├── app.dart                     # MaterialApp configuration
+├── injection_container.dart     # Dependency injection setup
+│
+├── core/                        # Servicios y utilidades compartidas
+│   ├── constants/              # Constantes de la app
+│   ├── database/               # Configuración Drift (SQLite)
+│   │   ├── database.dart       # Definición de tablas
+│   │   └── database.g.dart     # Código generado
+│   ├── errors/                 # Manejo de errores
+│   ├── network/                # Cliente HTTP (Dio)
+│   ├── services/               # Servicios globales
+│   │   ├── srs_service.dart    # Algoritmo SM-2
+│   │   └── srs_config_service.dart # Configuración SRS
+│   ├── theme/                  # Temas (light/dark)
+│   └── utils/                  # Utilidades generales
+│
+├── features/                    # Módulos de la aplicación
+│   ├── auth/                   # Autenticación
+│   │   ├── data/
+│   │   │   ├── datasources/   # AuthRemoteDataSource
+│   │   │   ├── models/        # UserModel
+│   │   │   └── repositories/  # AuthRepositoryImpl
+│   │   ├── domain/
+│   │   │   ├── entities/      # User
+│   │   │   ├── repositories/  # AuthRepository (interface)
+│   │   │   └── usecases/      # Login, Register, Logout
+│   │   └── presentation/
+│   │       ├── bloc/          # AuthBloc, AuthEvent, AuthState
+│   │       ├── pages/         # LoginPage, RegisterPage
+│   │       └── widgets/       # Componentes de auth
+│   │
+│   ├── courses/                # Gestión de cursos
+│   │   ├── data/
+│   │   ├── domain/
+│   │   │   └── entities/      # Course
+│   │   └── presentation/
+│   │       ├── bloc/          # CoursesBloc
+│   │       └── pages/         # CoursesPage
+│   │
+│   ├── notes/                  # Notas y contenido de estudio
+│   │   ├── data/
+│   │   ├── domain/
+│   │   │   └── entities/      # Note, OcclusionMark, ImageOcclusion
+│   │   └── presentation/
+│   │       ├── bloc/          # NotesBloc
+│   │       ├── pages/         # NotesPage, NoteEditorPage
+│   │       └── widgets/       # *** WIDGETS PRINCIPALES ***
+│   │           ├── rich_document_editor.dart      # Editor principal
+│   │           ├── study_document_viewer.dart     # Visor de estudio
+│   │           ├── image_occlusion_editor.dart    # Editor oclusiones imagen
+│   │           ├── image_fullscreen_viewer.dart   # Visor pantalla completa
+│   │           ├── latex_occlusion_editor.dart    # Editor oclusiones LaTeX
+│   │           ├── table_occlusion_editor.dart    # Editor oclusiones tabla
+│   │           ├── image_annotation_editor.dart   # Anotaciones en imagen
+│   │           └── annotations_painter.dart       # Painter de anotaciones
+│   │
+│   ├── pomodoro/               # Temporizador Pomodoro
+│   │   ├── data/
+│   │   ├── domain/
+│   │   │   └── entities/      # PomodoroSession
+│   │   └── presentation/
+│   │       ├── bloc/          # PomodoroBloc
+│   │       └── widgets/       # FloatingPomodoroWidget
+│   │
+│   ├── dashboard/              # Panel de estadísticas
+│   │   └── presentation/
+│   │       ├── bloc/          # DashboardBloc
+│   │       └── pages/         # DashboardPage
+│   │
+│   └── theme/                  # Gestión de tema
+│       └── presentation/
+│           └── bloc/          # ThemeBloc
 ```
 
-### Generación de Código
+---
 
-```bash
-# Generar código (Freezed, JSON Serializable, etc.)
-flutter pub run build_runner build --delete-conflicting-outputs
+## Base de Datos
 
-# Watch mode (regenera automáticamente)
-flutter pub run build_runner watch --delete-conflicting-outputs
+### Esquema SQLite (Drift)
+
+```sql
+-- Usuarios
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  name TEXT,
+  avatar_url TEXT,
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- Cursos
+CREATE TABLE courses (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  color TEXT DEFAULT '#6366F1',
+  is_favorite BOOLEAN DEFAULT FALSE,
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- Notas (con campos SRS)
+CREATE TABLE notes (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,              -- flashcard, cloze, image_occlusion, etc.
+  front_content TEXT NOT NULL,     -- Contenido Delta JSON (flutter_quill)
+  back_content TEXT,
+  tags TEXT,                       -- JSON array
+  difficulty INTEGER DEFAULT 0,
+  last_reviewed DATETIME,
+  next_review DATETIME,
+  review_count INTEGER DEFAULT 0,
+  -- Campos SRS (SM-2)
+  interval INTEGER DEFAULT 0,      -- Días hasta próximo repaso
+  ease_factor REAL DEFAULT 2.5,    -- Factor de facilidad
+  consecutive_correct INTEGER DEFAULT 0,
+  srs_state TEXT DEFAULT 'new',    -- new, learning, review, relearning
+  created_at DATETIME,
+  updated_at DATETIME
+);
+
+-- Sesiones de estudio
+CREATE TABLE study_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  cards_reviewed INTEGER,
+  cards_correct INTEGER,
+  duration_seconds INTEGER,
+  session_type TEXT DEFAULT 'review',
+  note_id TEXT,
+  started_at DATETIME,
+  ended_at DATETIME
+);
+
+-- Sesiones Pomodoro
+CREATE TABLE pomodoro_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  course_id TEXT,
+  note_id TEXT,
+  work_duration INTEGER DEFAULT 1500,   -- 25 min
+  break_duration INTEGER DEFAULT 300,   -- 5 min
+  is_completed BOOLEAN DEFAULT FALSE,
+  was_interrupted BOOLEAN DEFAULT FALSE,
+  started_at DATETIME,
+  completed_at DATETIME
+);
 ```
 
-### Testing
+---
+
+## Features Detalladas
+
+### 1. Editor de Texto Enriquecido
+
+**Archivo principal:** `lib/features/notes/presentation/widgets/rich_document_editor.dart`
+
+#### Toolbar - Fila 1 (QuillToolbar)
+| Herramienta | Descripción |
+|-------------|-------------|
+| **Selector de Fuente** | Sans Serif, Serif, Monospace, Roboto, Open Sans, Lato, Georgia, Courier |
+| **Selector de Tamaño** | Pequeño (10), Normal (14), Mediano (16), Grande (18), Muy grande (22), Título (28), Encabezado (36) |
+| **Negrita/Cursiva/Subrayado** | Formato básico de texto |
+| **Tachado** | Texto tachado |
+| **Color de texto** | Selector de color |
+| **Color de fondo** | Resaltado de texto |
+| **Alineación** | Izquierda, Centro, Derecha, Justificado |
+| **Interlineado** | Espaciado entre líneas |
+| **Listas** | Viñetas, Numeradas, Checkbox |
+| **Citas** | Bloques de cita |
+| **Código** | Inline y bloques de código |
+| **Links** | Hipervínculos |
+| **Deshacer/Rehacer** | Historial de cambios |
+
+#### Toolbar - Fila 2 (Botones Personalizados)
+| Herramienta | Descripción |
+|-------------|-------------|
+| **Superíndice/Subíndice** | x² y x₂ |
+| **MAYÚSCULAS/minúsculas/Capitalizar** | Transformación de texto |
+| **Oclusión de texto** | Marca texto para ocultar en estudio |
+| **Insertar imagen** | Con opción de oclusiones |
+| **Insertar LaTeX** | Fórmulas matemáticas |
+| **Insertar tabla** | Tablas con oclusiones |
+| **Pegar Markdown** | Importar desde clipboard |
+| **Editar oclusiones** | Modificar oclusiones existentes |
+
+#### Configuración del Editor
+
+```dart
+// Ubicación: rich_document_editor.dart línea ~2545
+quill.QuillToolbar.simple(
+  configurations: quill.QuillSimpleToolbarConfigurations(
+    controller: _controller,
+    showFontFamily: true,
+    fontFamilyValues: const {
+      'Sans Serif': 'sans-serif',
+      'Serif': 'serif',
+      // ...
+    },
+    showFontSize: true,
+    fontSizesValues: const {
+      'Pequeño': '10',
+      'Normal': '14',
+      // ...
+    },
+    showLineHeightButton: true,
+    // ... más configuración
+  ),
+),
+```
+
+---
+
+### 2. Sistema de Oclusiones
+
+#### Oclusiones de Imagen
+
+**Archivo:** `lib/features/notes/presentation/widgets/image_occlusion_editor.dart`
+
+```dart
+// Abrir editor de oclusiones
+final occlusions = await ImageOcclusionEditor.open(
+  context,
+  imagePath: '/path/to/image.png',
+  aspectRatio: 16/9,
+  initialOcclusions: [], // Oclusiones existentes
+);
+```
+
+**Características:**
+- Pantalla completa con zoom (0.5x - 5x)
+- Modo **Dibujar** (naranja): Arrastra para crear oclusión
+- Modo **Navegar** (azul): Arrastra para mover imagen
+- Coordenadas normalizadas (0-1) para diferentes resoluciones
+- Botones deshacer y limpiar todo
+
+#### Oclusiones de Texto (Cloze)
+
+**Formato en Delta JSON:**
+```json
+{
+  "insert": "La capital de Francia es ",
+  "attributes": {}
+},
+{
+  "insert": "París",
+  "attributes": {"occlusion": "1"}
+},
+{
+  "insert": ".\n"
+}
+```
+
+#### Oclusiones de Tabla
+
+**Archivo:** `lib/features/notes/presentation/widgets/table_occlusion_editor.dart`
+
+Permite ocultar celdas específicas de una tabla.
+
+#### Oclusiones LaTeX
+
+**Archivo:** `lib/features/notes/presentation/widgets/latex_occlusion_editor.dart`
+
+Permite ocultar partes de fórmulas matemáticas.
+
+---
+
+### 3. Sistema SRS (Spaced Repetition System)
+
+**Archivos:**
+- `lib/core/services/srs_service.dart` - Algoritmo SM-2
+- `lib/core/services/srs_config_service.dart` - Configuración
+
+#### Algoritmo SM-2
+
+```dart
+// Cálculo del próximo intervalo
+SRSResult calculateNextReview(Note note, int quality) {
+  // quality: 0-5 (0-2 = incorrecto, 3-5 = correcto)
+
+  if (quality < 3) {
+    // Respuesta incorrecta: reiniciar
+    return SRSResult(
+      interval: 1,
+      easeFactor: max(1.3, easeFactor - 0.2),
+      state: 'relearning',
+    );
+  }
+
+  // Respuesta correcta
+  double newEF = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+  int newInterval;
+
+  if (consecutiveCorrect == 0) {
+    newInterval = 1;
+  } else if (consecutiveCorrect == 1) {
+    newInterval = 6;
+  } else {
+    newInterval = (interval * newEF).round();
+  }
+
+  return SRSResult(
+    interval: newInterval,
+    easeFactor: max(1.3, newEF),
+    state: 'review',
+  );
+}
+```
+
+#### Estados SRS
+
+| Estado | Descripción |
+|--------|-------------|
+| `new` | Tarjeta nueva, nunca revisada |
+| `learning` | En proceso de aprendizaje inicial |
+| `review` | En ciclo de repaso normal |
+| `relearning` | Olvidada, re-aprendiendo |
+
+---
+
+### 4. Pomodoro Timer
+
+**Archivo:** `lib/features/pomodoro/presentation/widgets/floating_pomodoro_widget.dart`
+
+#### Características
+- Widget flotante y arrastrable
+- Se puede mover a cualquier parte de la pantalla
+- Persiste posición entre sesiones
+- Configurable: duración de trabajo y descanso
+- Integrado con sesiones de estudio
+
+#### Uso
+
+```dart
+// El widget se añade automáticamente en app.dart
+builder: (context, child) {
+  return Overlay(
+    initialEntries: [
+      OverlayEntry(
+        builder: (context) => Stack(
+          children: [
+            child ?? const SizedBox.shrink(),
+            const FloatingPomodoroWidget(), // ← Aquí
+          ],
+        ),
+      ),
+    ],
+  );
+},
+```
+
+---
+
+## Instalación y Desarrollo
+
+### Requisitos
+
+| Plataforma | Requisitos |
+|------------|------------|
+| **Todas** | Flutter SDK 3.27.1+, Dart SDK 3.5.0+ |
+| **Windows** | Visual Studio 2022 con "Desktop development with C++" |
+| **Linux** | Clang, CMake, GTK development headers, pkg-config |
+| **Android** | Android Studio, Android SDK |
+
+### Configuración Inicial
+
+```bash
+# 1. Clonar repositorio
+git clone https://github.com/Canazachyub/sinapsis.git
+cd sinapsis
+
+# 2. Crear archivo .env (opcional, para Supabase)
+cp .env.example .env
+# Editar .env con tus credenciales de Supabase
+
+# 3. Instalar dependencias
+flutter pub get
+
+# 4. Generar código (Drift, Freezed, etc.)
+dart run build_runner build --delete-conflicting-outputs
+
+# 5. Ejecutar
+flutter run -d linux    # Linux
+flutter run -d windows  # Windows
+flutter run -d chrome   # Web (experimental)
+```
+
+### Variables de Entorno (.env)
+
+```env
+# Modo offline (sin Supabase)
+APP_ENV=demo
+
+# Con Supabase
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_ANON_KEY=tu-anon-key
+```
+
+---
+
+## Compilación
+
+### Windows (GitHub Actions - Automático)
+
+```bash
+# Push a main dispara el build automáticamente
+git add -A
+git commit -m "feat: nueva característica"
+git push origin main
+
+# Descargar desde:
+# https://github.com/Canazachyub/sinapsis/actions
+# → Artifacts → sinapsis-windows-release.zip
+```
+
+### Windows (Manual)
+
+```powershell
+# Opción 1: Script automático
+.\build_windows.ps1
+
+# Opción 2: Manual
+flutter build windows --release
+
+# El ejecutable estará en:
+# build\windows\x64\runner\Release\sinapsis.exe
+```
+
+### Linux
+
+```bash
+flutter build linux --release
+# Resultado en: build/linux/x64/release/bundle/
+```
+
+### Android
+
+```bash
+flutter build apk --release
+# Resultado en: build/app/outputs/flutter-apk/app-release.apk
+```
+
+---
+
+## Guía de Modificación
+
+### Agregar Nueva Fuente al Editor
+
+1. Editar `lib/features/notes/presentation/widgets/rich_document_editor.dart`
+2. Buscar `fontFamilyValues` (línea ~2560)
+3. Agregar la fuente:
+
+```dart
+fontFamilyValues: const {
+  'Sans Serif': 'sans-serif',
+  'Mi Nueva Fuente': 'MiNuevaFuente', // ← Agregar aquí
+  // ...
+},
+```
+
+### Agregar Nuevo Tamaño de Fuente
+
+1. Mismo archivo, buscar `fontSizesValues` (línea ~2572)
+2. Agregar:
+
+```dart
+fontSizesValues: const {
+  'Pequeño': '10',
+  'Gigante': '48', // ← Agregar aquí
+  // ...
+},
+```
+
+### Modificar Algoritmo SRS
+
+1. Editar `lib/core/services/srs_service.dart`
+2. La función principal es `calculateNextReview()`
+3. Parámetros ajustables:
+   - Factor de facilidad inicial (2.5)
+   - Intervalos iniciales (1, 6 días)
+   - Penalización por error (-0.2)
+
+### Agregar Nueva Feature
+
+1. Crear estructura en `lib/features/nueva_feature/`:
+```
+nueva_feature/
+├── data/
+│   ├── datasources/
+│   ├── models/
+│   └── repositories/
+├── domain/
+│   ├── entities/
+│   ├── repositories/
+│   └── usecases/
+└── presentation/
+    ├── bloc/
+    ├── pages/
+    └── widgets/
+```
+
+2. Registrar en `lib/injection_container.dart`
+3. Agregar rutas en `lib/app.dart`
+
+### Modificar Tema
+
+1. Editar `lib/core/theme/app_theme.dart`
+2. Modificar `lightTheme` o `darkTheme`
+
+### Agregar Nueva Tabla a BD
+
+1. Editar `lib/core/database/database.dart`
+2. Crear clase de tabla:
+```dart
+class MiNuevaTabla extends Table {
+  TextColumn get id => text()();
+  // ... columnas
+  @override
+  Set<Column> get primaryKey => {id};
+}
+```
+
+3. Agregar a `@DriftDatabase(tables: [..., MiNuevaTabla])`
+4. Incrementar `schemaVersion`
+5. Agregar migración en `onUpgrade`
+6. Regenerar: `dart run build_runner build`
+
+---
+
+## Archivos Clave para Modificaciones
+
+| Archivo | Propósito |
+|---------|-----------|
+| `lib/app.dart` | Configuración de MaterialApp, rutas, localización |
+| `lib/injection_container.dart` | Inyección de dependencias |
+| `lib/core/database/database.dart` | Esquema de base de datos |
+| `lib/core/services/srs_service.dart` | Algoritmo de repetición espaciada |
+| `lib/features/notes/presentation/widgets/rich_document_editor.dart` | Editor de texto principal |
+| `lib/features/notes/presentation/widgets/image_occlusion_editor.dart` | Editor de oclusiones de imagen |
+| `lib/features/notes/presentation/widgets/study_document_viewer.dart` | Visor de modo estudio |
+| `lib/features/pomodoro/presentation/widgets/floating_pomodoro_widget.dart` | Timer Pomodoro |
+| `pubspec.yaml` | Dependencias del proyecto |
+
+---
+
+## Localización
+
+La app está configurada en **español** por defecto.
+
+**Configuración en `lib/app.dart`:**
+```dart
+locale: const Locale('es', 'ES'),
+supportedLocales: const [
+  Locale('es', 'ES'),
+  Locale('en', 'US'),
+],
+localizationsDelegates: const [
+  GlobalMaterialLocalizations.delegate,
+  GlobalWidgetsLocalizations.delegate,
+  GlobalCupertinoLocalizations.delegate,
+  FlutterQuillLocalizations.delegate,
+],
+```
+
+---
+
+## Tests
 
 ```bash
 # Ejecutar todos los tests
 flutter test
 
-# Tests con coverage
-flutter test --coverage
-
-# Ver coverage en HTML
-genhtml coverage/lcov.info -o coverage/html
-open coverage/html/index.html
+# Tests específicos
+flutter test test/core/services/srs_service_test.dart
+flutter test test/features/pomodoro/
 ```
 
-### Análisis de Código
-
-```bash
-# Análisis estático
-flutter analyze
-
-# Formatear código
-dart format lib/
-
-# Verificar formato
-dart format --set-exit-if-changed lib/
-```
-
-### Build
-
-```bash
-# Build para Linux
-flutter build linux
-
-# Build APK (Android)
-flutter build apk --release
-
-# Build App Bundle (Android)
-flutter build appbundle --release
-
-# Build Web
-flutter build web --release
-```
+**Tests disponibles:**
+- `test/core/services/srs_service_test.dart` - 14 tests del algoritmo SRS
+- `test/core/services/srs_config_service_test.dart` - 12 tests de configuración
+- `test/features/pomodoro/floating_pomodoro_widget_test.dart` - 15 tests del timer
 
 ---
 
-## 🧪 Testing
+## Créditos
 
-### Estructura de Tests
-
-```
-test/
-├── unit/
-│   ├── auth/
-│   │   ├── domain/
-│   │   │   └── usecases/
-│   │   │       └── login_test.dart
-│   │   └── data/
-│   │       └── repositories/
-│   │           └── auth_repository_impl_test.dart
-│   └── ...
-│
-├── widget/
-│   ├── auth/
-│   │   └── pages/
-│   │       └── login_page_test.dart
-│   └── ...
-│
-└── integration/
-    └── app_test.dart
-```
-
-### Ejemplos de Tests
-
-#### Test Unitario (Use Case)
-
-```dart
-// test/unit/auth/domain/usecases/login_test.dart
-import 'package:flutter_test/flutter_test.dart';
-import 'package:mockito/mockito.dart';
-
-void main() {
-  late Login usecase;
-  late MockAuthRepository mockAuthRepository;
-
-  setUp(() {
-    mockAuthRepository = MockAuthRepository();
-    usecase = Login(mockAuthRepository);
-  });
-
-  test('should return User when login is successful', () async {
-    // arrange
-    when(mockAuthRepository.login(any, any))
-        .thenAnswer((_) async => Right(tUser));
-
-    // act
-    final result = await usecase(Params(email: 'test@test.com', password: 'pass'));
-
-    // assert
-    expect(result, Right(tUser));
-    verify(mockAuthRepository.login('test@test.com', 'pass'));
-  });
-}
-```
-
-#### Test de Widget
-
-```dart
-// test/widget/auth/pages/login_page_test.dart
-import 'package:flutter_test/flutter_test.dart';
-
-void main() {
-  testWidgets('should display email and password fields', (tester) async {
-    // arrange
-    await tester.pumpWidget(MaterialApp(home: LoginPage()));
-
-    // act
-    final emailField = find.byKey(Key('email_field'));
-    final passwordField = find.byKey(Key('password_field'));
-
-    // assert
-    expect(emailField, findsOneWidget);
-    expect(passwordField, findsOneWidget);
-  });
-}
-```
-
-### Coverage
-
-Objetivo: **> 70% de coverage**
-
-```bash
-flutter test --coverage
-lcov --summary coverage/lcov.info
-```
+- **SM-2 Algorithm:** SuperMemo/Anki
+- **Flutter Framework:** Google
+- **BLoC Pattern:** Felix Angelov
+- **flutter_quill:** singerdmx
 
 ---
 
-## 🚀 Despliegue
+## Licencia
 
-### Linux (Snap Store)
-
-```bash
-# Build
-flutter build linux --release
-
-# Crear snap
-snapcraft
-
-# Publicar (requiere cuenta de Snapcraft)
-snapcraft upload sinapsis_1.0.0_amd64.snap --release stable
-```
-
-### Android (Google Play)
-
-```bash
-# Build App Bundle
-flutter build appbundle --release
-
-# Subir a Google Play Console
-# (Manual o con Fastlane)
-```
-
-### Web (Firebase Hosting / Vercel)
-
-```bash
-# Build
-flutter build web --release
-
-# Deploy a Firebase
-firebase deploy --only hosting
-
-# Deploy a Vercel
-vercel --prod
-```
+MIT License - Ver archivo LICENSE
 
 ---
 
-## 🤝 Contribución
-
-¡Contribuciones son bienvenidas! Por favor sigue estos pasos:
-
-1. **Fork** el proyecto
-2. Crea una **rama** para tu feature (`git checkout -b feature/AmazingFeature`)
-3. **Commit** tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. **Push** a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un **Pull Request**
-
-### Guía de Estilo
-
-- Sigue las [Dart Style Guidelines](https://dart.dev/guides/language/effective-dart/style)
-- Usa `dart format` antes de cada commit
-- Escribe tests para nuevas funcionalidades
-- Documenta funciones públicas con `///`
-
-### Conventional Commits
-
-Usamos [Conventional Commits](https://www.conventionalcommits.org/) para mensajes de commit:
-
-```
-feat: add image occlusion feature
-fix: resolve sync conflict issue
-docs: update README with new screenshots
-test: add tests for note repository
-```
-
----
-
-## 🗺️ Roadmap
-
-### v1.0 (MVP) - Q4 2025
-- ✅ Autenticación con email/password 
-- ✅ CRUD de cursos y notas
-- ✅ Flashcards y Cloze Tests
-- ✅ Image Occlusion
-- ✅ Code Blocks
-- ✅ Modo de estudio básico
-- ✅ Sincronización en tiempo real
-- ✅ Modo offline
-
-
----
-
-## 📄 Licencia
-
-Este proyecto está bajo la licencia **MIT**. Ver el archivo [LICENSE](LICENSE) para más detalles.
-
-```
-MIT License
-
-Copyright (c) 2025 Sinapsis Team
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction...
-```
-
----
-
-### Inspiración
-
-- **Anki** - Sistema de repetición espaciada
-- **Quizlet** - Interfaz de estudio intuitiva
-- **Notion** - Organización de contenido
-
-### Tecnologías
-
-Gracias a todos los paquetes de código abierto que hacen posible este proyecto:
-
-- [Flutter](https://flutter.dev/)
-- [Supabase](https://supabase.com/)
-- [BLoC Library](https://bloclibrary.dev/)
-- [Drift](https://drift.simonbinder.eu/)
-
-
----
+**Última actualización:** 2025-12-19
+**Versión:** 1.0.0
