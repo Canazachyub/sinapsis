@@ -3,6 +3,7 @@ name: Build Windows Release
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]   # un tag vX.Y.Z publica un Release con el binario
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:  # Allows manual trigger
