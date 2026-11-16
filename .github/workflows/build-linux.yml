@@ -8,6 +8,11 @@ on:
     branches: [ main, master ]
   workflow_dispatch:  # Allows manual trigger
 
+# Necesario para que el paso "Create Release" pueda crear el Release
+# (sin esto el GITHUB_TOKEN devuelve 403 "Resource not accessible by integration").
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
