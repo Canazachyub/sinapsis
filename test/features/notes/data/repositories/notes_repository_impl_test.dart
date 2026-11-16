@@ -33,6 +33,11 @@ void main() {
     updatedAt: tNow,
   );
 
+  setUpAll(() {
+    // Mockito no puede fabricar un NoteModel (freezed) por sí solo.
+    provideDummy<NoteModel>(tNoteModel);
+  });
+
   setUp(() {
     mockDataSource = MockNotesLocalDataSource();
     repository = NotesRepositoryImpl(localDataSource: mockDataSource);

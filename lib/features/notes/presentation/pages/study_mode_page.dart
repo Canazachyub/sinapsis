@@ -1,12 +1,19 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/services/estudio_preferencias.dart';
+import '../../../../injection_container.dart';
+import '../../data/datasources/notes_srs_datasource.dart';
 import '../../domain/entities/note.dart';
 import '../bloc/notes_bloc.dart';
+import '../widgets/estudio_comodo.dart';
 import '../widgets/study_document_viewer.dart';
+import 'review_page.dart';
 
-/// Pantalla de modo de estudio
-/// Muestra las notas con las oclusiones ocultas y permite revelarlas
+/// Modo estudio: recorre todas las notas del curso con las oclusiones
+/// tapadas. Las calificaciones se guardan en el repaso espaciado (SM-2),
+/// igual que en la página de repaso.
 class StudyModePage extends StatefulWidget {
   final String userId;
   final String courseId;
@@ -24,77 +31,130 @@ class StudyModePage extends StatefulWidget {
 }
 
 class _StudyModePageState extends State<StudyModePage> {
-  int _currentNoteIndex = 0;
-  bool _showAnswer = false;
-  final List<String> _difficulty = [];
+  final NotesSRSDataSource _srs = sl<NotesSRSDataSource>();
+  final ScrollController _scroll = ScrollController();
+
+  int _indice = 0;
+  bool _mostrando = false;
+  bool _guardando = false;
+
+  /// Estado SRS actualizado en esta sesión (las notas del bloc no se recargan).
+  final Map<String, EstadoSrs> _srsLocal = {};
+
+  /// Última calificación por nota en esta sesión.
+  final Map<String, CalificacionSrs> _calificadas = {};
+
+  /// Modo enfoque: oculta AppBar y barras secundarias (F11 / Esc).
+  bool _enfoque = false;
+
+  void _alternarEnfoque() => setState(() => _enfoque = !_enfoque);
 
   @override
   void initState() {
     super.initState();
+    EstudioPreferencias.cargar();
     context.read<NotesBloc>().add(LoadNotes(widget.userId, widget.courseId));
   }
 
-  void _nextNote(List<Note> notes) {
-    if (_currentNoteIndex < notes.length - 1) {
-      setState(() {
-        _currentNoteIndex++;
-        _showAnswer = false;
-      });
-    } else {
-      // Sesión completada
-      _showCompletionDialog(notes.length);
-    }
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
   }
 
-  void _previousNote() {
-    if (_currentNoteIndex > 0) {
-      setState(() {
-        _currentNoteIndex--;
-        _showAnswer = false;
-      });
-    }
-  }
-
-  void _markDifficulty(String level, List<Note> notes) {
+  void _irA(int indice) {
     setState(() {
-      if (_difficulty.length <= _currentNoteIndex) {
-        _difficulty.add(level);
-      } else {
-        _difficulty[_currentNoteIndex] = level;
-      }
+      _indice = indice;
+      _mostrando = false;
     });
-
-    // Avanzar a la siguiente nota
-    Future.delayed(const Duration(milliseconds: 500), () {
-      _nextNote(notes);
+    // Cada nota empieza arriba.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.jumpTo(0);
     });
   }
 
-  void _showCompletionDialog(int totalNotes) {
+  void _siguiente(List<Note> notas) {
+    if (_indice < notas.length - 1) {
+      _irA(_indice + 1);
+    } else {
+      _dialogoFinal(notas.length);
+    }
+  }
+
+  void _anterior() {
+    if (_indice > 0) _irA(_indice - 1);
+  }
+
+  Future<void> _calificar(CalificacionSrs c, List<Note> notas) async {
+    if (!_mostrando || _guardando || notas.isEmpty) return;
+    final nota = notas[_indice];
+    setState(() => _guardando = true);
+    try {
+      final nuevo = await _srs.calificar(nota.id, c);
+      if (!mounted) return;
+      setState(() {
+        _guardando = false;
+        _srsLocal[nota.id] = nuevo;
+        _calificadas[nota.id] = c;
+      });
+      _siguiente(notas);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _guardando = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar la calificación: $e')),
+      );
+    }
+  }
+
+  void _dialogoFinal(int total) {
+    final cuenta = <CalificacionSrs, int>{};
+    for (final c in _calificadas.values) {
+      cuenta[c] = (cuenta[c] ?? 0) + 1;
+    }
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('¡Sesión Completada!'),
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¡Sesión completada!'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Has revisado $totalNotes notas.'),
-            const SizedBox(height: 16),
-            const Text('Estadísticas:', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text('Has recorrido $total ${total == 1 ? 'nota' : 'notas'} '
+                'y calificado ${_calificadas.length}.'),
+            const SizedBox(height: 12),
+            for (final c in CalificacionSrs.values)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(color: colorCalificacion(c), shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('${c.etiqueta}: ${cuenta[c] ?? 0}'),
+                  ],
+                ),
+              ),
             const SizedBox(height: 8),
-            _buildStat('No sabía', _difficulty.where((d) => d == 'hard').length, Colors.red),
-            _buildStat('Difícil', _difficulty.where((d) => d == 'medium').length, Colors.orange),
-            _buildStat('Fácil', _difficulty.where((d) => d == 'easy').length, Colors.green),
-            _buildStat('Dominada', _difficulty.where((d) => d == 'mastered').length, Colors.blue),
+            const Text('Las calificaciones ya están guardadas en tu repaso espaciado.'),
           ],
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _irA(0);
+            },
+            child: const Text('Empezar de nuevo'),
+          ),
           FilledButton(
             onPressed: () {
-              Navigator.pop(context); // Cerrar dialog
-              Navigator.pop(context); // Volver a la lista de notas
+              Navigator.pop(dialogContext);
+              Navigator.pop(context);
             },
             child: const Text('Finalizar'),
           ),
@@ -103,207 +163,213 @@ class _StudyModePageState extends State<StudyModePage> {
     );
   }
 
-  Widget _buildStat(String label, int count, Color color) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text('$label: $count'),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.courseName),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
-      ),
-      body: BlocBuilder<NotesBloc, NotesState>(
-        builder: (context, state) {
-          if (state is NotesLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (state is NotesLoaded) {
-            if (state.notes.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.note_outlined, size: 80, color: Colors.grey[400]),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No hay notas para estudiar',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Colors.grey[600],
-                          ),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            final currentNote = state.notes[_currentNoteIndex];
-            final isMobile = Platform.isAndroid || Platform.isIOS;
-            final hPadding = isMobile ? 8.0 : 12.0;
-
-            return Column(
-              children: [
-                // Barra de progreso compacta con título
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: hPadding, vertical: 6),
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: Row(
-                    children: [
-                      // Progreso
-                      Text(
-                        'Nota ${_currentNoteIndex + 1} de ${state.notes.length}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: LinearProgressIndicator(
-                          value: (_currentNoteIndex + 1) / state.notes.length,
-                          backgroundColor: Colors.grey[300],
-                          minHeight: 6,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '${((_currentNoteIndex / state.notes.length) * 100).toStringAsFixed(0)}%',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
+    return BlocBuilder<NotesBloc, NotesState>(
+      builder: (context, state) {
+        final notas = _notasDe(state) ?? const <Note>[];
+        return AtajosEstudio(
+          enfoque: _enfoque,
+          autofocus: true,
+          onAlternarEnfoque: _alternarEnfoque,
+          extra: {
+            const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+              if (notas.isNotEmpty) _siguiente(notas);
+            },
+            const SingleActivator(LogicalKeyboardKey.arrowLeft): _anterior,
+            if (notas.isNotEmpty)
+              const SingleActivator(LogicalKeyboardKey.space): () {
+                if (!_mostrando) setState(() => _mostrando = true);
+              },
+            if (notas.isNotEmpty && _mostrando) ...atajosCalificacion((c) => _calificar(c, notas)),
+          },
+          child: Scaffold(
+            // Un solo botón de salir: la flecha "atrás" de la AppBar.
+            appBar: _enfoque
+                ? null
+                : AppBar(
+                    title: Text(widget.courseName),
+                    actions: [
+                      const BotonesEscalaTexto(),
+                      IconButton(
+                        icon: const Icon(Icons.fullscreen),
+                        tooltip: 'Modo enfoque (F11)',
+                        onPressed: _alternarEnfoque,
                       ),
                     ],
                   ),
-                ),
+            body: _cuerpo(context, state),
+          ),
+        );
+      },
+    );
+  }
 
-                // Título compacto
-                Padding(
-                  padding: EdgeInsets.fromLTRB(hPadding, 8, hPadding, 4),
-                  child: Text(
-                    currentNote.title,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
+  static List<Note>? _notasDe(NotesState state) => switch (state) {
+        NotesLoaded s => s.notes,
+        NotesSaving s => s.notes,
+        _ => null,
+      };
 
-                // Documento con oclusiones - más espacio
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.symmetric(horizontal: isMobile ? 4 : 8, vertical: 4),
-                    child: StudyDocumentViewer(
-                      content: currentNote.content,
-                      showOcclusions: _showAnswer,
-                    ),
-                  ),
-                ),
+  Widget _cuerpo(BuildContext context, NotesState state) {
+    if (state is NotesLoading || state is NotesInitial) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final lista = _notasDe(state);
+    if (lista == null) {
+      return const Center(child: Text('Error al cargar las notas'));
+    }
+    final cs = Theme.of(context).colorScheme;
+    if (lista.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.note_outlined, size: 80, color: cs.onSurfaceVariant),
+            const SizedBox(height: 16),
+            Text('No hay notas para estudiar',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(color: cs.onSurfaceVariant)),
+          ],
+        ),
+      );
+    }
 
-                // Botones de acción compactos
-                Container(
-                  padding: EdgeInsets.fromLTRB(hPadding, 8, hPadding, 8),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface,
-                    border: Border(
-                      top: BorderSide(color: Theme.of(context).dividerColor),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!_showAnswer) ...[
-                        FilledButton.icon(
-                          onPressed: () => setState(() => _showAnswer = true),
-                          icon: const Icon(Icons.visibility, size: 20),
-                          label: const Text('Mostrar Respuesta'),
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(double.infinity, 40),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                        ),
-                      ] else ...[
-                        // Botones de dificultad en una sola fila
-                        Row(
+    final notas = lista;
+    if (_indice >= notas.length) _indice = notas.length - 1;
+    final nota = notas[_indice];
+    final srs = _srsLocal[nota.id] ?? nota.srs;
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    final hPadding = isMobile ? 8.0 : 12.0;
+    final anchoMaximo = _enfoque ? EstudioLayout.anchoLecturaEnfoque : EstudioLayout.anchoLecturaNormal;
+
+    final columna = Column(
+      children: [
+        // Indicador único de progreso: "3 de 7" con barra coherente.
+        Padding(
+          padding: EdgeInsets.fromLTRB(hPadding + 4, _enfoque ? 6 : 8, _enfoque ? 260 : hPadding + 4, 4),
+          child: Row(
+            children: [
+              Text('${_indice + 1} de ${notas.length}',
+                  style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(width: 12),
+              Expanded(
+                child: LinearProgressIndicator(
+                  value: (_indice + 1) / notas.length,
+                  minHeight: 4,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              if (_calificadas[nota.id] != null) ...[
+                const SizedBox(width: 12),
+                Icon(Icons.check_circle, size: 18, color: colorCalificacion(_calificadas[nota.id]!)),
+              ],
+            ],
+          ),
+        ),
+
+        // Documento con oclusiones: columna de lectura centrada y escalable
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final lateral = isMobile ? 4.0 : (_enfoque ? 24.0 : 12.0);
+              final ancho = (constraints.maxWidth - lateral * 2).clamp(0.0, anchoMaximo).toDouble();
+              return SingleChildScrollView(
+                controller: _scroll,
+                padding: EdgeInsets.symmetric(horizontal: lateral, vertical: _enfoque ? 16 : 4),
+                child: Center(
+                  child: SizedBox(
+                    width: ancho,
+                    child: EscalaTextoEstudio(
+                      child: AnchoContenidoEstudio(
+                        ancho: ancho,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Expanded(child: _buildDifficultyButton('❌', Colors.red, () => _markDifficulty('hard', state.notes))),
-                            const SizedBox(width: 6),
-                            Expanded(child: _buildDifficultyButton('😐', Colors.orange, () => _markDifficulty('medium', state.notes))),
-                            const SizedBox(width: 6),
-                            Expanded(child: _buildDifficultyButton('👍', Colors.green, () => _markDifficulty('easy', state.notes))),
-                            const SizedBox(width: 6),
-                            Expanded(child: _buildDifficultyButton('⭐', Colors.blue, () => _markDifficulty('mastered', state.notes))),
+                            TituloNotaEstudio(note: nota),
+                            StudyDocumentViewer(
+                              key: ValueKey(nota.id),
+                              content: nota.content,
+                              showOcclusions: _mostrando,
+                              sinMarco: _enfoque,
+                            ),
                           ],
                         ),
-                      ],
-                      const SizedBox(height: 6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          TextButton.icon(
-                            onPressed: _currentNoteIndex > 0 ? _previousNote : null,
-                            icon: const Icon(Icons.arrow_back, size: 18),
-                            label: const Text('Anterior'),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ),
-                          TextButton.icon(
-                            onPressed: () => _nextNote(state.notes),
-                            icon: const Icon(Icons.arrow_forward, size: 18),
-                            label: const Text('Siguiente'),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          ),
-                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ],
-            );
-          }
+              );
+            },
+          ),
+        ),
 
-          return const Center(child: Text('Error al cargar las notas'));
-        },
+        Container(
+          padding: EdgeInsets.fromLTRB(hPadding, 8, hPadding, 8),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: anchoMaximo),
+              child: _acciones(notas, srs),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    if (!_enfoque) return columna;
+
+    return SafeArea(
+      child: Stack(
+        children: [
+          columna,
+          Positioned(
+            top: 6,
+            right: 12,
+            child: BarraFlotanteEnfoque(onSalir: _alternarEnfoque),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildDifficultyButton(String label, Color color, VoidCallback onPressed) {
-    final isMobile = Platform.isAndroid || Platform.isIOS;
-    return ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        padding: EdgeInsets.symmetric(vertical: isMobile ? 6 : 8),
-        minimumSize: Size(0, isMobile ? 32 : 36),
-      ),
-      child: Text(label, style: TextStyle(fontSize: isMobile ? 16 : 18)),
+  Widget _acciones(List<Note> notas, EstadoSrs srs) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!_mostrando)
+          FilledButton.icon(
+            onPressed: () => setState(() => _mostrando = true),
+            icon: const Icon(Icons.visibility, size: 20),
+            label: const Text('Mostrar  (espacio)'),
+            style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 44)),
+          )
+        else
+          BotonesCalificacion(
+            previstos: _srs.previsualizar(srs),
+            onCalificar: _guardando ? null : (c) => _calificar(c, notas),
+          ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            TextButton.icon(
+              onPressed: _indice > 0 ? _anterior : null,
+              icon: const Icon(Icons.arrow_back, size: 18),
+              label: const Text('Anterior (←)'),
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            ),
+            TextButton.icon(
+              onPressed: () => _siguiente(notas),
+              icon: const Icon(Icons.arrow_forward, size: 18),
+              label: const Text('Saltar (→)'),
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

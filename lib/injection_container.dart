@@ -8,6 +8,8 @@ import 'core/network/network_info.dart';
 import 'core/network/dio_client.dart';
 import 'core/database/database.dart';
 import 'core/services/data_backup_service.dart';
+import 'core/services/inbox_import_service.dart';
+import 'core/services/supabase_sync_helper.dart';
 
 // Auth
 import 'features/auth/data/datasources/auth_local_datasource.dart';
@@ -155,7 +157,10 @@ Future<void> init() async {
 
   // Courses - Repository
   sl.registerLazySingleton<CoursesRepository>(
-    () => CoursesRepositoryImpl(localDataSource: sl()),
+    () => CoursesRepositoryImpl(
+      localDataSource: sl(),
+      syncHelper: sl.isRegistered<SupabaseSyncHelper>() ? sl<SupabaseSyncHelper>() : null,
+    ),
   );
 
   // Courses - Data Sources
@@ -171,7 +176,10 @@ Future<void> init() async {
 
   // Notes - Repository
   sl.registerLazySingleton<NotesRepository>(
-    () => NotesRepositoryImpl(localDataSource: sl()),
+    () => NotesRepositoryImpl(
+      localDataSource: sl(),
+      syncHelper: sl.isRegistered<SupabaseSyncHelper>() ? sl<SupabaseSyncHelper>() : null,
+    ),
   );
 
   // Notes - Data Sources
@@ -203,12 +211,26 @@ Future<void> init() async {
     () => DataBackupService(sl()),
   );
 
-  // Sync Service
+  // Buzón del anotador (importa anotador_*.json de ~/Documentos/sinapsis/inbox)
+  sl.registerLazySingleton<InboxImportService>(
+    () => InboxImportService(sl()),
+  );
+
+  // Sync Service (para Drift - legacy)
   sl.registerLazySingleton<SyncService>(
     () => SyncService(
       supabaseClient: sl(),
       database: sl(),
       prefs: sl(),
+    ),
+  );
+
+  // Supabase Sync Helper (sync directo para notas y cursos)
+  sl.registerLazySingleton<SupabaseSyncHelper>(
+    () => SupabaseSyncHelper(
+      client: sl(),
+      notesLocal: sl(),
+      coursesLocal: sl(),
     ),
   );
 

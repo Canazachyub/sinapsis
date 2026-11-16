@@ -111,7 +111,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         // Email
                         AuthTextField(
                           controller: _emailController,
-                          label: 'Email',
+                          label: 'Correo electrónico',
                           hint: 'tu@email.com',
                           keyboardType: TextInputType.emailAddress,
                           prefixIcon: Icons.email_outlined,

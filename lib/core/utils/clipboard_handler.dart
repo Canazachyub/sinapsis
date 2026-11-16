@@ -10,6 +10,9 @@ import 'package:super_clipboard/super_clipboard.dart';
 /// Tipos de contenido en el portapapeles
 enum ClipboardContentType {
   text,
+  /// HTML con formato (navegador, ChatGPT, Google Docs...). `data` es el HTML
+  /// y [ClipboardContent.textoPlano] guarda la versión en texto plano.
+  html,
   image,
   empty,
 }
@@ -19,13 +22,22 @@ class ClipboardContent {
   final ClipboardContentType type;
   final dynamic data;
 
+  /// Versión en texto plano cuando [type] es `html` (puede ser null).
+  final String? textoPlano;
+
   const ClipboardContent({
     required this.type,
     required this.data,
+    this.textoPlano,
   });
 
   bool get isEmpty => type == ClipboardContentType.empty;
   bool get isText => type == ClipboardContentType.text;
+  bool get isHtml => type == ClipboardContentType.html;
+
+  /// Texto plano disponible: el propio `data` si es texto, o [textoPlano] si es HTML.
+  String? get textoDisponible =>
+      isText ? data as String? : (isHtml ? textoPlano : null);
   bool get isImage => type == ClipboardContentType.image;
 }
 
@@ -64,7 +76,23 @@ class ClipboardHandler {
         }
       }
 
-      // Si no hay imagen, intentar leer texto
+      // HTML con formato (si hay): se devuelve junto al texto plano
+      if (reader.canProvide(Formats.htmlText)) {
+        final html = await reader.readValue(Formats.htmlText);
+        if (html != null && html.trim().isNotEmpty) {
+          String? plano;
+          if (reader.canProvide(Formats.plainText)) {
+            plano = await reader.readValue(Formats.plainText);
+          }
+          return ClipboardContent(
+            type: ClipboardContentType.html,
+            data: html,
+            textoPlano: plano,
+          );
+        }
+      }
+
+      // Si no hay imagen ni HTML, intentar leer texto
       if (reader.canProvide(Formats.plainText)) {
         final text = await reader.readValue(Formats.plainText);
         if (text != null && text.isNotEmpty) {

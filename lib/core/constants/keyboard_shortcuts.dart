@@ -53,6 +53,9 @@ class EditorShortcuts {
   static const textOcclusion = SingleActivator(LogicalKeyboardKey.keyO, control: true);
   static const imageOcclusion = SingleActivator(LogicalKeyboardKey.keyO, control: true, shift: true);
 
+  /// Marcar / quitar oclusión de la selección (botón Oclusión de la barra).
+  static const oclusion = SingleActivator(LogicalKeyboardKey.keyO, control: true, shift: true);
+
   // Vista previa y ayuda
   static const preview = SingleActivator(LogicalKeyboardKey.f6);
   static const help = SingleActivator(LogicalKeyboardKey.f1);
@@ -134,7 +137,7 @@ class ShortcutDescriptions {
     'Ctrl+M': 'minúsculas',
     'Ctrl+Alt+M': 'Capitalizar',
     'Ctrl+O': 'Oclusión de texto',
-    'Ctrl+Shift+O': 'Oclusión de imagen',
+    'Ctrl+Shift+O': 'Marcar / quitar oclusión',
     'F6': 'Vista previa',
     'F1': 'Ayuda',
     'Ctrl+\\': 'Limpiar formato',

@@ -2,6 +2,7 @@ import 'package:dartz/dartz.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/errors/exceptions.dart';
 import '../../../../core/errors/failures.dart';
+import '../../../../core/services/supabase_sync_helper.dart';
 import '../../domain/entities/course.dart';
 import '../../domain/repositories/courses_repository.dart';
 import '../datasources/courses_local_datasource.dart';
@@ -9,8 +10,9 @@ import '../models/course_model.dart';
 
 class CoursesRepositoryImpl implements CoursesRepository {
   final CoursesLocalDataSource localDataSource;
+  final SupabaseSyncHelper? syncHelper;
 
-  CoursesRepositoryImpl({required this.localDataSource});
+  CoursesRepositoryImpl({required this.localDataSource, this.syncHelper});
 
   @override
   Future<Either<Failure, List<Course>>> getAllCourses(String userId) async {
@@ -53,6 +55,7 @@ class CoursesRepositoryImpl implements CoursesRepository {
       );
 
       await localDataSource.saveCourse(course);
+      syncHelper?.pushCourse(course);
       return Right(course.toEntity());
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
@@ -66,6 +69,7 @@ class CoursesRepositoryImpl implements CoursesRepository {
         updatedAt: DateTime.now(),
       );
       await localDataSource.updateCourse(model);
+      syncHelper?.pushCourse(model);
       return Right(model.toEntity());
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
@@ -76,6 +80,7 @@ class CoursesRepositoryImpl implements CoursesRepository {
   Future<Either<Failure, void>> deleteCourse(String id) async {
     try {
       await localDataSource.deleteCourse(id);
+      syncHelper?.deleteCourseRemote(id);
       return const Right(null);
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
@@ -91,6 +96,7 @@ class CoursesRepositoryImpl implements CoursesRepository {
         updatedAt: DateTime.now(),
       );
       await localDataSource.updateCourse(updated);
+      syncHelper?.pushCourse(updated);
       return Right(updated.toEntity());
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));

@@ -4,6 +4,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
 import 'core/theme/app_theme.dart';
+import 'core/services/inbox_import_service.dart';
+import 'core/services/supabase_sync_helper.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
 import 'features/courses/presentation/bloc/courses_bloc.dart';
 import 'features/notes/presentation/bloc/notes_bloc.dart';
@@ -18,6 +20,11 @@ import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/register_page.dart';
 import 'features/dashboard/presentation/pages/dashboard_page.dart';
 import 'injection_container.dart';
+
+/// Messenger global para mostrar SnackBars desde fuera de un Scaffold
+/// (p. ej. tras navegar al dashboard desde el splash).
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 
 class SinapsisApp extends StatelessWidget {
   const SinapsisApp({super.key});
@@ -56,6 +63,7 @@ class SinapsisApp extends StatelessWidget {
           return MaterialApp(
             title: 'Sinapsis',
             debugShowCheckedModeBanner: false,
+            scaffoldMessengerKey: scaffoldMessengerKey,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeState.themeMode,
@@ -108,13 +116,38 @@ class SplashPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: BlocListener<AuthBloc, AuthState>(
-        listener: (context, state) {
+        listener: (context, state) async {
           if (state is Authenticated) {
-            // Establecer userId en PomodoroBloc
-            context.read<PomodoroBloc>().add(SetUserId(state.user.id));
-            // Iniciar sincronización automática
+            final userId = state.user.id;
+            context.read<PomodoroBloc>().add(SetUserId(userId));
             context.read<SyncBloc>().add(const SyncAutoStarted());
+
+            // Importar capturas del anotador que esperen en el buzón
+            // (~/Documentos/sinapsis/inbox) ANTES del pull de Supabase,
+            // para que el sync ya las vea. Nunca lanza.
+            final inbox = await sl<InboxImportService>().importarPendientes();
+
+            // Pull initial data de Supabase (notas + cursos)
+            sl<SupabaseSyncHelper>().pullAll();
+
+            if (!context.mounted) return;
+            if (!inbox.sinPendientes) {
+              // Los blocs viven en MultiBlocProvider (por encima del
+              // Navigator), así que siguen vivos tras cambiar de ruta.
+              context.read<CoursesBloc>().add(LoadCourses(userId));
+            }
             Navigator.of(context).pushReplacementNamed('/dashboard');
+
+            if (inbox.importoAlgo || inbox.ficherosError > 0) {
+              scaffoldMessengerKey.currentState
+                ?..hideCurrentSnackBar()
+                ..showSnackBar(
+                  SnackBar(
+                    content: Text(inbox.mensaje),
+                    duration: const Duration(seconds: 5),
+                  ),
+                );
+            }
           } else if (state is Unauthenticated) {
             Navigator.of(context).pushReplacementNamed('/login');
           }

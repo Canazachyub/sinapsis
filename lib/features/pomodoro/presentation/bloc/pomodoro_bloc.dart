@@ -149,7 +149,7 @@ class PomodoroBloc extends Bloc<PomodoroEvent, PomodoroBlockState> {
           // Guardar la sesión en la base de datos
           if (_pomodoroDataSource != null && _currentUserId != null) {
             try {
-              await _pomodoroDataSource!.savePomodoroSession(
+              await _pomodoroDataSource.savePomodoroSession(
                 userId: _currentUserId!,
                 courseId: currentState.courseId,
                 noteId: currentState.noteId,
@@ -160,7 +160,7 @@ class PomodoroBloc extends Bloc<PomodoroEvent, PomodoroBlockState> {
               );
             } catch (e) {
               // Log error but don't interrupt the flow
-              AppLogger.e('Error saving pomodoro session', e);
+              AppLogger.e('Error guardando la sesión de Pomodoro', e);
             }
           }
 

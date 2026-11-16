@@ -2,12 +2,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../auth/presentation/pages/profile_page.dart';
 import '../../../courses/presentation/pages/courses_page.dart';
 import '../../../pomodoro/presentation/widgets/pomodoro_timer_widget.dart';
 import '../../../notes/presentation/pages/review_page.dart';
-import '../../../theme/presentation/bloc/theme_bloc.dart';
-import '../../../theme/presentation/bloc/theme_event.dart';
-import '../../../theme/presentation/bloc/theme_state.dart';
 import '../bloc/dashboard_bloc.dart';
 import 'srs_stats_page.dart';
 
@@ -27,7 +25,7 @@ class _DashboardPageState extends State<DashboardPage> {
   final List<Widget> _pages = [
     const CoursesPage(),
     const _StatsPage(),
-    const _ProfilePage(),
+    const ProfilePage(),
   ];
 
   @override
@@ -47,20 +45,24 @@ class _DashboardPageState extends State<DashboardPage> {
               _selectedIndex = index;
             });
           },
-          destinations: const [
+          labelTextStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: _isMobile ? 11 : 13),
+          ),
+          indicatorShape: const StadiumBorder(),
+          destinations: [
             NavigationDestination(
-              icon: Icon(Icons.school_outlined),
-              selectedIcon: Icon(Icons.school),
+              icon: Icon(Icons.school_outlined, size: _isMobile ? 22 : 26),
+              selectedIcon: Icon(Icons.school, size: _isMobile ? 22 : 26),
               label: 'Cursos',
             ),
             NavigationDestination(
-              icon: Icon(Icons.bar_chart_outlined),
-              selectedIcon: Icon(Icons.bar_chart),
+              icon: Icon(Icons.bar_chart_outlined, size: _isMobile ? 22 : 26),
+              selectedIcon: Icon(Icons.bar_chart, size: _isMobile ? 22 : 26),
               label: 'Estadísticas',
             ),
             NavigationDestination(
-              icon: Icon(Icons.person_outlined),
-              selectedIcon: Icon(Icons.person),
+              icon: Icon(Icons.person_outlined, size: _isMobile ? 22 : 26),
+              selectedIcon: Icon(Icons.person, size: _isMobile ? 22 : 26),
               label: 'Perfil',
             ),
           ],
@@ -148,23 +150,30 @@ class _StatsPageState extends State<_StatsPage> {
             return ListView(
                 padding: EdgeInsets.all(edgePadding),
                 children: [
-                  // Sección de Pomodoro
-                  Text(
-                    'Pomodoro Timer',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
+                  // Temporizador Pomodoro (el widget ya muestra su propio título)
                   const PomodoroTimerWidget(),
 
                   SizedBox(height: sectionSpacing),
                   const Divider(),
                   const SizedBox(height: 16),
 
-                  // Estadísticas rápidas
+                  // Repaso espaciado (datos reales de las notas)
                   Text(
-                    'Estadísticas de Hoy',
+                    'Repaso de hoy',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildRepasoCard(context, stats),
+
+                  SizedBox(height: sectionSpacing),
+                  const Divider(),
+                  const SizedBox(height: 16),
+
+                  // Totales
+                  Text(
+                    'Resumen',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -223,94 +232,6 @@ class _StatsPageState extends State<_StatsPage> {
                   const Divider(),
                   const SizedBox(height: 16),
 
-                  // Repasos pendientes
-                  Text(
-                    'Repasos Pendientes',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        children: [
-                          Icon(
-                            stats.notesNeedingReview > 0
-                                ? Icons.calendar_today
-                                : Icons.check_circle_outline,
-                            size: 48,
-                            color: stats.notesNeedingReview > 0
-                                ? Colors.orange[400]
-                                : Colors.grey[400],
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            stats.notesNeedingReview > 0
-                                ? '${stats.notesNeedingReview} ${stats.notesNeedingReview == 1 ? 'nota necesita' : 'notas necesitan'} repaso'
-                                : 'No hay repasos programados',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: stats.notesNeedingReview > 0
-                                      ? Colors.orange[700]
-                                      : Colors.grey[600],
-                                  fontWeight: stats.notesNeedingReview > 0
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            stats.notesNeedingReview > 0
-                                ? 'Repasa estas notas para mejorar tu retención'
-                                : 'Comienza a estudiar para ver tus repasos espaciados',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Colors.grey[500],
-                                ),
-                            textAlign: TextAlign.center,
-                          ),
-                          if (stats.notesNeedingReview > 0) ...[
-                            const SizedBox(height: 16),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const ReviewPage(),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.psychology),
-                              label: const Text('Iniciar Revisión'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          TextButton.icon(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const SRSStatsPage(),
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.analytics),
-                            label: const Text('Ver Estadísticas SRS'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  SizedBox(height: sectionSpacing),
-                  const Divider(),
-                  const SizedBox(height: 16),
-
                   // Progreso semanal
                   Text(
                     'Progreso de la Semana',
@@ -348,7 +269,7 @@ class _StatsPageState extends State<_StatsPage> {
 
                   // Consejos
                   Card(
-                    color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                    color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -385,6 +306,158 @@ class _StatsPageState extends State<_StatsPage> {
     );
   }
 
+  Future<void> _abrirRepaso(BuildContext context) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ReviewPage()),
+    );
+    if (!context.mounted) return;
+    final authState = context.read<AuthBloc>().state;
+    if (authState is Authenticated) {
+      context.read<DashboardBloc>().add(RefreshDashboardStats(authState.user.id));
+    }
+  }
+
+  Widget _buildRepasoCard(BuildContext context, DashboardStatistics stats) {
+    final cs = Theme.of(context).colorScheme;
+    final srs = stats.srs;
+    final pendientes = srs?.pendientesHoy ?? stats.notesNeedingReview;
+    final nuevas = srs?.nuevasDisponiblesHoy ?? 0;
+    final cola = pendientes + nuevas;
+    final retencion = srs?.retencion30;
+
+    String titulo;
+    String detalle;
+    if (cola > 0) {
+      titulo = pendientes > 0
+          ? '$pendientes ${pendientes == 1 ? 'repaso pendiente' : 'repasos pendientes'}'
+          : 'Sin repasos vencidos';
+      detalle = nuevas > 0
+          ? '$nuevas ${nuevas == 1 ? 'nota nueva disponible' : 'notas nuevas disponibles'} hoy'
+          : 'Repasa ahora para no perder lo aprendido';
+    } else {
+      titulo = '¡Todo al día!';
+      final proximo = srs?.proximoRepaso;
+      detalle = proximo != null
+          ? 'Próximo repaso: ${_fecha(proximo)}'
+          : 'Aún no hay repasos programados';
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Icon(
+                  cola > 0 ? Icons.psychology : Icons.check_circle_outline,
+                  size: 40,
+                  color: cola > 0 ? Colors.orange : Colors.green,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        titulo,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        detalle,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (cola > 0)
+                  FilledButton.icon(
+                    onPressed: () => _abrirRepaso(context),
+                    icon: const Icon(Icons.play_arrow),
+                    label: Text('Repasar ($cola)'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.spaceEvenly,
+              children: [
+                _miniDato(context, 'Pendientes hoy', '$pendientes', Icons.event, Colors.orange),
+                _miniDato(context, 'Nuevas', '${srs?.nuevas ?? 0}', Icons.fiber_new, Colors.blue),
+                _miniDato(context, 'Repasadas hoy', '${srs?.repasadasHoy ?? 0}', Icons.done_all, Colors.green),
+                _miniDato(context, 'Racha', '${srs?.racha ?? 0} ${(srs?.racha ?? 0) == 1 ? 'día' : 'días'}',
+                    Icons.local_fire_department, Colors.deepOrange),
+                _miniDato(
+                  context,
+                  'Retención (30 d)',
+                  retencion == null ? '—' : '${(retencion * 100).toStringAsFixed(0)} %',
+                  Icons.insights,
+                  Colors.purple,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const SRSStatsPage()),
+                  );
+                },
+                icon: const Icon(Icons.analytics),
+                label: const Text('Ver estadísticas de repaso'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _miniDato(BuildContext context, String etiqueta, String valor, IconData icono, Color color) {
+    final cs = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 120,
+      child: Column(
+        children: [
+          Icon(icono, color: color, size: 22),
+          const SizedBox(height: 4),
+          Text(
+            valor,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          Text(
+            etiqueta,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fecha(DateTime d) {
+    final hoy = DateTime.now();
+    final dia = DateTime(d.year, d.month, d.day);
+    final diff = dia.difference(DateTime(hoy.year, hoy.month, hoy.day)).inDays;
+    if (diff == 1) return 'mañana';
+    const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    final base = '${d.day} ${meses[d.month - 1]}';
+    return diff < 7 ? '$base (en $diff días)' : base;
+  }
+
   Widget _buildCompactStatCard(
     BuildContext context,
     String title,
@@ -415,7 +488,7 @@ class _StatsPageState extends State<_StatsPage> {
             Text(
               title,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[600],
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
           ],
@@ -430,8 +503,8 @@ class _StatsPageState extends State<_StatsPage> {
 
     // Convert weekly minutes to hours (weekday 1-7 maps to index 0-6)
     final hours = List.generate(7, (index) {
-      final weekday = index + 1; // Monday = 1, Sunday = 7
-      final minutes = stats.weeklyMinutes[weekday] ?? 0;
+      // StatisticsDataSource usa claves 0-6 (lunes = 0).
+      final minutes = stats.weeklyMinutes[index] ?? 0;
       return minutes / 60.0; // Convert to hours
     });
 
@@ -459,7 +532,7 @@ class _StatsPageState extends State<_StatsPage> {
                 decoration: BoxDecoration(
                   color: isToday
                       ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                      : Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
                 ),
               ),
@@ -477,205 +550,6 @@ class _StatsPageState extends State<_StatsPage> {
           ],
         );
       }),
-    );
-  }
-}
-
-class _ProfilePage extends StatelessWidget {
-  const _ProfilePage();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Perfil'),
-      ),
-      body: BlocBuilder<AuthBloc, AuthState>(
-        builder: (context, state) {
-          if (state is Authenticated) {
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Center(
-                  child: CircleAvatar(
-                    radius: 50,
-                    child: Text(
-                      state.user.email[0].toUpperCase(),
-                      style: const TextStyle(fontSize: 40),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Center(
-                  child: Text(
-                    state.user.name ?? state.user.email,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: Text(
-                    state.user.email,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // Sección de Apariencia
-                Text(
-                  'Apariencia',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 12),
-                Card(
-                  child: BlocBuilder<ThemeBloc, ThemeState>(
-                    builder: (context, themeState) {
-                      String themeLabel;
-                      IconData themeIcon;
-
-                      switch (themeState.themeMode) {
-                        case ThemeMode.light:
-                          themeLabel = 'Claro';
-                          themeIcon = Icons.light_mode;
-                          break;
-                        case ThemeMode.dark:
-                          themeLabel = 'Oscuro';
-                          themeIcon = Icons.dark_mode;
-                          break;
-                        case ThemeMode.system:
-                          themeLabel = 'Sistema';
-                          themeIcon = Icons.brightness_auto;
-                          break;
-                      }
-
-                      return ListTile(
-                        leading: Icon(themeIcon),
-                        title: const Text('Tema de la interfaz'),
-                        subtitle: Text(themeLabel),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => _showThemeDialog(context, themeState.themeMode),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                const Divider(),
-                ListTile(
-                  leading: const Icon(Icons.logout),
-                  title: const Text('Cerrar Sesión'),
-                  onTap: () {
-                    context.read<AuthBloc>().add(const LogoutRequested());
-                  },
-                ),
-              ],
-            );
-          }
-          return const Center(child: CircularProgressIndicator());
-        },
-      ),
-    );
-  }
-
-  Future<void> _showThemeDialog(BuildContext context, ThemeMode currentMode) async {
-    final result = await showDialog<ThemeMode>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Seleccionar tema'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _ThemeOption(
-              mode: ThemeMode.system,
-              label: 'Automático (Sistema)',
-              subtitle: 'Sigue la configuración del dispositivo',
-              icon: Icons.brightness_auto,
-              isSelected: currentMode == ThemeMode.system,
-            ),
-            const Divider(),
-            _ThemeOption(
-              mode: ThemeMode.light,
-              label: 'Claro',
-              subtitle: 'Siempre usar tema claro',
-              icon: Icons.light_mode,
-              isSelected: currentMode == ThemeMode.light,
-            ),
-            const Divider(),
-            _ThemeOption(
-              mode: ThemeMode.dark,
-              label: 'Oscuro',
-              subtitle: 'Siempre usar tema oscuro',
-              icon: Icons.dark_mode,
-              isSelected: currentMode == ThemeMode.dark,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
-          ),
-        ],
-      ),
-    );
-
-    if (result != null && result != currentMode && context.mounted) {
-      context.read<ThemeBloc>().add(ThemeChanged(result));
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Tema actualizado correctamente'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-    }
-  }
-}
-
-class _ThemeOption extends StatelessWidget {
-  final ThemeMode mode;
-  final String label;
-  final String subtitle;
-  final IconData icon;
-  final bool isSelected;
-
-  const _ThemeOption({
-    required this.mode,
-    required this.label,
-    required this.subtitle,
-    required this.icon,
-    required this.isSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(
-        icon,
-        color: isSelected
-            ? Theme.of(context).colorScheme.primary
-            : null,
-      ),
-      title: Text(
-        label,
-        style: TextStyle(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          color: isSelected
-              ? Theme.of(context).colorScheme.primary
-              : null,
-        ),
-      ),
-      subtitle: Text(subtitle),
-      trailing: isSelected
-          ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
-          : null,
-      onTap: () => Navigator.pop(context, mode),
     );
   }
 }

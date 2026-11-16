@@ -2,6 +2,7 @@ import 'package:dartz/dartz.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/errors/exceptions.dart';
 import '../../../../core/errors/failures.dart';
+import '../../../../core/services/supabase_sync_helper.dart';
 import '../../domain/entities/note.dart';
 import '../../domain/repositories/notes_repository.dart';
 import '../datasources/notes_local_datasource.dart';
@@ -9,8 +10,9 @@ import '../models/note_model.dart';
 
 class NotesRepositoryImpl implements NotesRepository {
   final NotesLocalDataSource localDataSource;
+  final SupabaseSyncHelper? syncHelper;
 
-  NotesRepositoryImpl({required this.localDataSource});
+  NotesRepositoryImpl({required this.localDataSource, this.syncHelper});
 
   @override
   Future<Either<Failure, List<Note>>> getAllNotes(String userId) async {
@@ -66,6 +68,7 @@ class NotesRepositoryImpl implements NotesRepository {
       );
 
       await localDataSource.saveNote(note);
+      syncHelper?.pushNote(note);
       return Right(note.toEntity());
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
@@ -79,6 +82,7 @@ class NotesRepositoryImpl implements NotesRepository {
         updatedAt: DateTime.now(),
       );
       await localDataSource.updateNote(model);
+      syncHelper?.pushNote(model);
       return Right(model.toEntity());
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
@@ -89,6 +93,7 @@ class NotesRepositoryImpl implements NotesRepository {
   Future<Either<Failure, void>> deleteNote(String id) async {
     try {
       await localDataSource.deleteNote(id);
+      syncHelper?.deleteNoteRemote(id);
       return const Right(null);
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));

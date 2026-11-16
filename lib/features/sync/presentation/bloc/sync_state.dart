@@ -30,3 +30,9 @@ class SyncFailure extends SyncState {
 }
 
 class SyncOffline extends SyncState {}
+
+/// Supabase no está configurado en `.env` (la app funciona solo en local).
+class SyncNoConfigurado extends SyncState {}
+
+/// Supabase está configurado pero no hay sesión iniciada en Supabase.
+class SyncSinSesion extends SyncState {}

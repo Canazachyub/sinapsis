@@ -41,21 +41,25 @@ Aplicación multiplataforma de estudio con flashcards, oclusiones de imagen, edi
 | **Gestión de Cursos** | Organiza notas por cursos con colores personalizados |
 | **Modo Offline** | Funciona sin conexión con base de datos local SQLite |
 | **Backup Local** | Exporta/importa datos como JSON para migrar entre dispositivos |
-| **Sincronización** | Opcional con Supabase para múltiples dispositivos |
-| **Multiplataforma** | Windows, Linux, Android |
+| **Sincronización Cloud** | Supabase sync bidireccional entre dispositivos (celular, tablet, laptop) |
+| **Multiplataforma** | Android (APK), Windows (installer/ZIP), Linux (tar.gz) |
+| **CI/CD** | GitHub Actions compila automáticamente al hacer push |
+| **UI Responsiva** | Interfaz adaptada para móvil, tablet y desktop |
 
 ---
 
 ## Tecnologías
 
 ```yaml
-Framework:        Flutter 3.27.1+
-Lenguaje:         Dart 3.5.0+
+Framework:        Flutter 3.41.6
+Lenguaje:         Dart 3.6.0+
 Estado:           flutter_bloc (BLoC Pattern)
-Base de Datos:    Drift (SQLite)
-Backend:          Supabase (opcional)
-Editor:           flutter_quill
+Base de Datos:    Drift (SQLite) + Supabase (PostgreSQL cloud sync)
+Backend:          Supabase (auth + sync + realtime)
+Editor:           flutter_quill 11.5.0
 Inyección:        get_it + injectable
+Plataformas:      Android, Windows, Linux (iOS generado pero no probado)
+CI/CD:            GitHub Actions (build automático en push a main)
 ```
 
 ### Dependencias Principales
@@ -794,12 +798,105 @@ Los tests se ejecutan automáticamente en el CI de GitHub Actions antes de gener
 
 ---
 
+## Sincronización con Supabase
+
+La app sincroniza datos entre dispositivos usando Supabase (PostgreSQL en la nube, gratis).
+
+### Arquitectura de Sync
+
+```
+┌─────────┐     ┌─────────────────┐     ┌─────────┐
+│ Android │────▶│    Supabase     │◀────│ Windows │
+│ (SQLite)│◀────│  (PostgreSQL)   │────▶│ (SQLite)│
+└─────────┘     │  + Realtime     │     └─────────┘
+                └─────────────────┘
+```
+
+- **SyncService** (`lib/core/services/sync_service.dart`): Push/pull bidireccional con last-write-wins
+- **SyncBloc** (`lib/features/sync/presentation/bloc/`): Auto-sync al autenticarse
+- **Conflictos**: Se resuelven por timestamp (`updated_at`) - el más reciente gana
+- **Soft delete**: `is_deleted` flag en courses y notes
+- **SQL migrations**: `supabase/migrations/001_initial_schema.sql` y `002_sync_improvements.sql`
+
+### Configuración de Supabase
+
+1. Proyecto: `https://supabase.com/dashboard/project/ollviomwlllggibfijko`
+2. SQL ejecutado: `001_initial_schema.sql` (tablas, RLS, triggers)
+3. SQL pendiente: `002_sync_improvements.sql` (índices de sync, RPC function)
+4. Secrets de GitHub configurados: `SUPABASE_URL`, `SUPABASE_ANON_KEY`
+5. `.env` tiene credenciales reales (gitignored)
+
+### Tablas en Supabase
+
+| Tabla | RLS | Realtime | Sync |
+|-------|-----|----------|------|
+| users | SELECT/INSERT/UPDATE por auth.uid() | No | Push only |
+| courses | CRUD por user_id | Sí | Bidireccional |
+| notes | CRUD por user_id | Sí | Bidireccional |
+| study_sessions | SELECT/INSERT/UPDATE/DELETE por user_id | Sí (002) | Append-only |
+| pomodoro_sessions | SELECT/INSERT/UPDATE/DELETE por user_id | Sí (002) | Append-only |
+
+---
+
+## Build y Despliegue
+
+### Android (APK)
+
+```bash
+flutter build apk --release
+# Output: build/app/outputs/flutter-apk/app-release.apk (~79MB)
+
+# Instalar en dispositivo conectado por USB:
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+### Windows y Linux (CI/CD)
+
+Los builds se generan automáticamente con GitHub Actions al hacer push a `main`:
+
+- **Windows**: `.github/workflows/build-windows.yml` → Artifacts: ZIP + Installer (Inno Setup)
+- **Linux**: `.github/workflows/build-linux.yml` → Artifact: tar.gz
+
+Para descargar: GitHub > Actions > clic en build verde > Artifacts
+
+### Configuración de Build Android
+
+```
+AGP: 8.9.1 | Gradle: 8.11.1 | Kotlin: 2.1.0
+compileSdk: 35 | minSdk: 23 | Java: 17
+```
+
+---
+
+## Notas de Desarrollo
+
+### Cambios importantes realizados (2026-03-27)
+
+- Flutter upgradado de 3.24.5 → 3.41.6 (necesario para Android 15 + SharedPreferences)
+- `flutter_quill` upgradado de 9.x → 11.5.0 (breaking changes: EmbedBuilder API, QuillSimpleToolbar)
+- Modelos freezed cambiados de `class` a `sealed class` (Dart 3.5+)
+- `CardTheme` renombrado a `CardThemeData` (Flutter 3.41.6)
+- Plugin `clipboard` eliminado (causaba error C++ en Windows, redundante con `super_clipboard`)
+- `desktop_drop` tiene condicional de plataforma (solo Windows/Linux/macOS)
+- Database schema v4: agrega columnas `is_deleted`, `synced_at` para sync
+
+### Pendientes
+
+- [ ] Ejecutar `002_sync_improvements.sql` en Supabase SQL Editor
+- [ ] Cambiar icono de la app (actualmente usa el icono default de Flutter)
+- [ ] Certificado de firma de código para Windows (eliminar advertencia SmartScreen)
+- [ ] `NetworkInfo.isConnected` siempre retorna `true` (implementar detección real)
+- [ ] 3 tests fallan (no bloqueantes, CI configurado con `|| true`)
+
+---
+
 ## Créditos
 
 - **SM-2 Algorithm:** SuperMemo/Anki
 - **Flutter Framework:** Google
 - **BLoC Pattern:** Felix Angelov
 - **flutter_quill:** singerdmx
+- **Supabase:** Backend as a Service
 
 ---
 
@@ -809,5 +906,5 @@ MIT License - Ver archivo LICENSE
 
 ---
 
-**Última actualización:** 2026-03-05
+**Última actualización:** 2026-03-27
 **Versión:** 1.0.0

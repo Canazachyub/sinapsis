@@ -1,7 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sinapsis/core/constants/image_constants.dart';
+import 'package:sinapsis/core/services/estudio_preferencias.dart';
+import 'estilos_documento.dart';
+import 'estudio_comodo.dart';
 import 'image_fullscreen_viewer.dart';
 import 'latex_occlusion_editor.dart';
 import 'table_occlusion_editor.dart';
@@ -101,15 +105,28 @@ String _toSubscript(String text) {
 class StudyDocumentViewer extends StatefulWidget {
   final String content; // Delta JSON
   final bool showOcclusions; // Si es true, muestra todas las oclusiones
+  /// Sin borde ni relleno extra (modo enfoque): más espacio para el contenido.
+  final bool sinMarco;
 
   const StudyDocumentViewer({
     super.key,
     required this.content,
     required this.showOcclusions,
+    this.sinMarco = false,
   });
 
   @override
   State<StudyDocumentViewer> createState() => _StudyDocumentViewerState();
+}
+
+/// Convierte "#RRGGBB" o "#AARRGGBB" en [Color] (null si no es válido).
+Color? _parseColorHex(Object? valor) {
+  if (valor is! String) return null;
+  var hex = valor.trim().replaceFirst('#', '');
+  if (hex.length == 6) hex = 'FF$hex';
+  if (hex.length != 8) return null;
+  final n = int.tryParse(hex, radix: 16);
+  return n == null ? null : Color(n);
 }
 
 class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
@@ -122,6 +139,10 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
   int _imageOcclusionCount = 0;
   int _latexOcclusionCount = 0;
   int _tableOcclusionCount = 0;
+
+  /// Se incrementa al destapar/tapar todas: fuerza a los widgets de imagen,
+  /// LaTeX y tabla a recrearse con el nuevo estado del padre.
+  int _generacion = 0;
 
   @override
   void initState() {
@@ -143,10 +164,11 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
           .map((e) => e as Map<String, dynamic>)
           .toList();
 
-      // Contar oclusiones de texto
+      // Contar oclusiones de texto (formato nuevo `oclusion: true` y
+      // formato antiguo con fondo #FFEB3B)
       _occlusionCount = _deltaJson.where((op) {
         final attributes = op['attributes'] as Map<String, dynamic>?;
-        return attributes != null && attributes['background'] == '#FFEB3B';
+        return op['insert'] is String && OclusionTexto.esOclusion(attributes);
       }).length;
 
       // Contar oclusiones de imagen, LaTeX y tabla
@@ -217,10 +239,65 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
     });
   }
 
+  /// Destapa (o vuelve a tapar) TODAS las oclusiones del documento: texto,
+  /// imágenes, LaTeX y tablas. Los índices siguen el mismo orden que
+  /// [_buildInteractiveDocument].
+  void _ponerTodas({required bool destapar}) {
+    setState(() {
+      _revealedOcclusions.clear();
+      _revealedImageOcclusions.clear();
+      _revealedLatexOcclusions.clear();
+      _revealedTableOcclusions.clear();
+      if (destapar) {
+        for (var i = 0; i < _occlusionCount; i++) {
+          _revealedOcclusions.add(i);
+        }
+        var img = 0;
+        var lat = 0;
+        var tab = 0;
+        for (final op in _deltaJson) {
+          final insert = op['insert'];
+          if (insert is! Map) continue;
+          try {
+            if (insert.containsKey('image_occluded')) {
+              final d = jsonDecode(insert['image_occluded']) as Map<String, dynamic>;
+              final n = (d['occlusions'] as List?)?.length ?? 0;
+              _revealedImageOcclusions[img] = {for (var i = 0; i < n; i++) i};
+              img++;
+            } else if (insert.containsKey('latex_occluded')) {
+              final d = jsonDecode(insert['latex_occluded']) as Map<String, dynamic>;
+              final n = (d['occlusions'] as List?)?.length ?? 0;
+              _revealedLatexOcclusions[lat] = {for (var i = 0; i < n; i++) i};
+              lat++;
+            } else if (insert.containsKey('table_occluded')) {
+              final d = jsonDecode(insert['table_occluded']) as Map<String, dynamic>;
+              final columnas = d['columns'] as int;
+              final occ = (d['occlusions'] as List?) ?? const [];
+              _revealedTableOcclusions[tab] = {
+                for (final o in occ)
+                  TableOcclusion.fromJson(o as Map<String, dynamic>).row * columnas +
+                      TableOcclusion.fromJson(o).col,
+              };
+              tab++;
+            }
+          } catch (_) {}
+        }
+      }
+      _generacion++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_deltaJson.isEmpty) {
       return const Center(child: Text('No hay contenido'));
+    }
+
+    if (widget.sinMarco) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: _buildInteractiveDocument(context),
+      );
     }
 
     return Container(
@@ -236,26 +313,182 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
     );
   }
 
-  Widget _buildInteractiveDocument(BuildContext context) {
-    final children = <Widget>[];
-    final textSpans = <InlineSpan>[];
-    int occlusionIndex = 0;
-    int imageIndex = 0;
-    int tableIndex = 0;
+  /// Una línea del documento con la hoja de estilos común
+  /// ([EstiloDocumento]): espaciado, títulos, listas con sangría francesa,
+  /// citas con barra lateral y bloques de código con fondo.
+  Widget _lineaDocumento(
+    BuildContext context, {
+    required Map<String, dynamic>? bloque,
+    required List<InlineSpan> spans,
+    required Map<String, dynamic>? anterior,
+    required Map<String, dynamic>? siguiente,
+    required bool hayAnterior,
+    required bool haySiguiente,
+    required int numero,
+  }) {
+    final tema = Theme.of(context);
+    final cs = tema.colorScheme;
+    final escalador = MediaQuery.textScalerOf(context);
+    final escala = escalador.scale(16) / 16;
+    final tipo = EstiloDocumento.tipoDe(bloque);
+    final esp = EstiloDocumento.espaciadoLinea(
+      bloque,
+      anterior: anterior,
+      siguiente: siguiente,
+      hayAnterior: hayAnterior,
+      haySiguiente: haySiguiente,
+      escala: escala,
+    );
+    final estilo = switch (tipo) {
+      TipoBloqueDocumento.titulo =>
+        EstiloDocumento.titulo(tema, (bloque!['header'] as num).toInt()),
+      TipoBloqueDocumento.cita => EstiloDocumento.cita(tema),
+      TipoBloqueDocumento.codigo => EstiloDocumento.codigo(tema),
+      _ => EstiloDocumento.cuerpo(tema),
+    };
+    final alineacion = switch (bloque?['align']) {
+      'center' => TextAlign.center,
+      'right' => TextAlign.right,
+      'justify' => TextAlign.justify,
+      _ => TextAlign.start,
+    };
+    final sangria = ((bloque?['indent'] as num?)?.toInt() ?? 0) * EstiloDocumento.sangriaNivel * escala;
 
-    void _flushTextSpans() {
-      if (textSpans.isNotEmpty) {
-        children.add(
-          RichText(
-            text: TextSpan(
-              style: DefaultTextStyle.of(context).style,
-              children: List.from(textSpans),
+    // RichText no aplica la escala del MediaQuery por defecto: se pasa
+    // explícitamente para respetar el tamaño de texto de estudio.
+    Widget texto = RichText(
+      textScaler: escalador,
+      textAlign: alineacion,
+      text: TextSpan(
+        style: estilo,
+        // Línea vacía: un espacio de ancho cero conserva su altura
+        children: spans.isEmpty ? const [TextSpan(text: '\u200B')] : spans,
+      ),
+    );
+
+    switch (tipo) {
+      case TipoBloqueDocumento.lista:
+        final lista = bloque!['list'];
+        final Widget marcador = switch (lista) {
+          'checked' => Icon(Icons.check_box, size: 18 * escala, color: cs.primary),
+          'unchecked' => Icon(Icons.check_box_outline_blank, size: 18 * escala, color: cs.onSurfaceVariant),
+          _ => RichText(
+              textScaler: escalador,
+              text: TextSpan(
+                text: lista == 'ordered' ? '$numero.' : '•',
+                style: estilo.copyWith(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: lista == 'ordered' ? FontWeight.w500 : FontWeight.w700,
+                ),
+              ),
+            ),
+        };
+        texto = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: (EstiloDocumento.anchoMarcador + EstiloDocumento.sangriaLista) * escala,
+              child: Padding(
+                padding: EdgeInsets.only(right: 8 * escala, top: lista == 'checked' || lista == 'unchecked' ? 3 * escala : 0),
+                child: Align(alignment: Alignment.topRight, child: marcador),
+              ),
+            ),
+            Expanded(child: texto),
+          ],
+        );
+      case TipoBloqueDocumento.cita:
+        texto = Container(
+          padding: EdgeInsets.only(left: 16 * escala, top: 2 * escala, bottom: 2 * escala),
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(
+                width: EstiloDocumento.anchoBarraCita,
+                color: EstiloDocumento.barraCita(tema),
+              ),
             ),
           ),
+          child: texto,
         );
-        textSpans.clear();
-      }
+      case TipoBloqueDocumento.codigo:
+        final primero = !hayAnterior || EstiloDocumento.tipoDe(anterior) != tipo;
+        final ultimo = !haySiguiente || EstiloDocumento.tipoDe(siguiente) != tipo;
+        const r = Radius.circular(EstiloDocumento.radioCodigo);
+        texto = Container(
+          padding: EdgeInsets.fromLTRB(16, primero ? 12 : 0, 16, ultimo ? 12 : 0),
+          decoration: BoxDecoration(
+            color: EstiloDocumento.fondoCodigo(tema),
+            borderRadius: BorderRadius.only(
+              topLeft: primero ? r : Radius.zero,
+              topRight: primero ? r : Radius.zero,
+              bottomLeft: ultimo ? r : Radius.zero,
+              bottomRight: ultimo ? r : Radius.zero,
+            ),
+          ),
+          child: texto,
+        );
+      case TipoBloqueDocumento.titulo:
+      case TipoBloqueDocumento.parrafo:
+        break;
     }
+
+    return Padding(
+      padding: EdgeInsets.only(top: esp.arriba, bottom: esp.abajo, left: sangria),
+      child: texto,
+    );
+  }
+
+  Widget _buildInteractiveDocument(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final children = <Widget>[];
+    // Líneas ya cerradas del tramo actual (atributos de bloque + fragmentos)
+    final lineas = <({Map<String, dynamic>? bloque, List<InlineSpan> spans})>[];
+    // Fragmentos de la línea en curso
+    final lineaActual = <InlineSpan>[];
+    int occlusionIndex = 0;
+    int imageIndex = 0;
+    int latexIndex = 0;
+    int tableIndex = 0;
+
+    void cerrarLinea(Map<String, dynamic>? bloque) {
+      lineas.add((bloque: bloque, spans: List<InlineSpan>.of(lineaActual)));
+      lineaActual.clear();
+    }
+
+    void flushTextSpans() {
+      if (lineaActual.isNotEmpty) cerrarLinea(null);
+      if (lineas.isEmpty) return;
+      final widgets = <Widget>[];
+      var contadorOrdenada = 0;
+      for (var i = 0; i < lineas.length; i++) {
+        final l = lineas[i];
+        final lista = l.bloque?['list'];
+        if (lista == 'ordered') {
+          contadorOrdenada++;
+        } else if (EstiloDocumento.tipoDe(l.bloque) != TipoBloqueDocumento.lista) {
+          contadorOrdenada = 0;
+        }
+        widgets.add(_lineaDocumento(
+          context,
+          bloque: l.bloque,
+          spans: l.spans,
+          anterior: i > 0 ? lineas[i - 1].bloque : null,
+          siguiente: i < lineas.length - 1 ? lineas[i + 1].bloque : null,
+          hayAnterior: i > 0,
+          haySiguiente: i < lineas.length - 1,
+          numero: contadorOrdenada,
+        ));
+      }
+      children.add(Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: widgets,
+      ));
+      lineas.clear();
+    }
+
+    Widget errorEmbed(String texto) => Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(texto, style: TextStyle(color: cs.error)),
+        );
 
     for (final op in _deltaJson) {
       final insert = op['insert'];
@@ -263,7 +496,7 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
 
       // Manejar embeds (imágenes, etc.)
       if (insert is Map) {
-        _flushTextSpans();
+        flushTextSpans();
 
         // Caso 1: Imagen con oclusiones
         if (insert.containsKey('image_occluded')) {
@@ -275,13 +508,17 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
             final annotationsData = data['annotations'] as List<dynamic>?;
             final drawingsData = data['drawings'] as List<dynamic>?;
 
+            // Coordenadas normalizadas limitadas a [0, 1] (ficheros externos
+            // como el anotador pueden traer valores ligeramente fuera de rango).
+            double leer(Map<String, dynamic> m, String k) =>
+                ((m[k] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0);
             final occlusions = occlusionsData?.map((o) {
               final oMap = o as Map<String, dynamic>;
               return Rect.fromLTRB(
-                (oMap['left'] as num).toDouble(),
-                (oMap['top'] as num).toDouble(),
-                (oMap['right'] as num).toDouble(),
-                (oMap['bottom'] as num).toDouble(),
+                leer(oMap, 'left'),
+                leer(oMap, 'top'),
+                leer(oMap, 'right'),
+                leer(oMap, 'bottom'),
               );
             }).toList() ?? [];
 
@@ -296,26 +533,29 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
               'bottom': r.bottom,
             }).toList();
 
+            final indiceImagen = imageIndex;
             children.add(
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: _StudyImageWidget(
+                  key: ValueKey('img-$indiceImagen-$_generacion'),
                   imagePath: imagePath,
                   aspectRatio: aspectRatio,
+                  tamanoNatural: ConTamanoNatural.desdeDatos(data),
                   occlusions: occlusions,
                   annotations: annotations,
                   drawings: drawings,
                   occlusionsMap: occlusionsMap,
-                  imageIndex: imageIndex,
-                  initialRevealedOcclusions: _revealedImageOcclusions[imageIndex] ?? {},
+                  imageIndex: indiceImagen,
+                  initialRevealedOcclusions: _revealedImageOcclusions[indiceImagen] ?? {},
                   showAll: widget.showOcclusions,
                   onOcclusionToggle: (occIndex) {
                     setState(() {
-                      _revealedImageOcclusions.putIfAbsent(imageIndex, () => {});
-                      if (_revealedImageOcclusions[imageIndex]!.contains(occIndex)) {
-                        _revealedImageOcclusions[imageIndex]!.remove(occIndex);
+                      _revealedImageOcclusions.putIfAbsent(indiceImagen, () => {});
+                      if (_revealedImageOcclusions[indiceImagen]!.contains(occIndex)) {
+                        _revealedImageOcclusions[indiceImagen]!.remove(occIndex);
                       } else {
-                        _revealedImageOcclusions[imageIndex]!.add(occIndex);
+                        _revealedImageOcclusions[indiceImagen]!.add(occIndex);
                       }
                     });
                   },
@@ -324,12 +564,7 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
             );
             imageIndex++;
           } catch (e) {
-            children.add(
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text('Error al cargar imagen con oclusiones: $e'),
-              ),
-            );
+            children.add(errorEmbed('Error al cargar imagen con oclusiones: $e'));
           }
           continue;
         }
@@ -346,37 +581,34 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
               return LatexOcclusion.fromJson(oMap);
             }).toList() ?? [];
 
-            final latexIndex = children.length; // Usamos el índice del widget en lugar de un contador separado
+            final indiceLatex = latexIndex;
 
             children.add(
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: _StudyLatexWidget(
+                  key: ValueKey('latex-$indiceLatex-$_generacion'),
                   latexCode: latexCode,
                   occlusions: occlusions,
-                  latexIndex: latexIndex,
-                  initialRevealedOcclusions: _revealedLatexOcclusions[latexIndex] ?? {},
+                  latexIndex: indiceLatex,
+                  initialRevealedOcclusions: _revealedLatexOcclusions[indiceLatex] ?? {},
                   showAll: widget.showOcclusions,
                   onOcclusionToggle: (occIndex) {
                     setState(() {
-                      _revealedLatexOcclusions.putIfAbsent(latexIndex, () => {});
-                      if (_revealedLatexOcclusions[latexIndex]!.contains(occIndex)) {
-                        _revealedLatexOcclusions[latexIndex]!.remove(occIndex);
+                      _revealedLatexOcclusions.putIfAbsent(indiceLatex, () => {});
+                      if (_revealedLatexOcclusions[indiceLatex]!.contains(occIndex)) {
+                        _revealedLatexOcclusions[indiceLatex]!.remove(occIndex);
                       } else {
-                        _revealedLatexOcclusions[latexIndex]!.add(occIndex);
+                        _revealedLatexOcclusions[indiceLatex]!.add(occIndex);
                       }
                     });
                   },
                 ),
               ),
             );
+            latexIndex++;
           } catch (e) {
-            children.add(
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text('Error al cargar LaTeX con oclusiones: $e'),
-              ),
-            );
+            children.add(errorEmbed('Error al cargar LaTeX con oclusiones: $e'));
           }
           continue;
         }
@@ -391,9 +623,9 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.purple.shade50,
+                    color: cs.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.purple.shade200),
+                    border: Border.all(color: cs.outlineVariant),
                   ),
                   child: Center(
                     child: _buildLatexWidget(latexCode),
@@ -402,12 +634,7 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
               ),
             );
           } catch (e) {
-            children.add(
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text('Error al cargar LaTeX: $e'),
-              ),
-            );
+            children.add(errorEmbed('Error al cargar LaTeX: $e'));
           }
           continue;
         }
@@ -427,23 +654,24 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Container(
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade400),
+                    border: Border.all(color: cs.outline),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Table(
-                    border: TableBorder.all(color: Colors.grey.shade300),
+                    border: TableBorder.all(color: cs.outlineVariant),
                     defaultVerticalAlignment: TableCellVerticalAlignment.middle,
                     children: List.generate(
                       rows,
                       (rowIndex) => TableRow(
+                        decoration: rowIndex == 0
+                            ? BoxDecoration(color: cs.surfaceContainerHighest)
+                            : null,
                         children: List.generate(
                           columns,
                           (colIndex) => Container(
                             padding: const EdgeInsets.all(8),
                             child: Text(
-                              cells[rowIndex][colIndex].isEmpty
-                                  ? (rowIndex == 0 ? 'Col ${colIndex + 1}' : '')
-                                  : cells[rowIndex][colIndex],
+                              _celdaEstudio(cells, rowIndex, colIndex),
                               style: TextStyle(
                                 fontWeight: rowIndex == 0 ? FontWeight.bold : FontWeight.normal,
                               ),
@@ -457,12 +685,7 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
               ),
             );
           } catch (e) {
-            children.add(
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text('Error al cargar tabla: $e'),
-              ),
-            );
+            children.add(errorEmbed('Error al cargar tabla: $e'));
           }
           continue;
         }
@@ -483,26 +706,26 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
               return TableOcclusion.fromJson(oMap);
             }).toList() ?? [];
 
+            final indiceTabla = tableIndex;
             children.add(
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: _StudyTableWidget(
+                  key: ValueKey('tabla-$indiceTabla-$_generacion'),
                   rows: rows,
                   columns: columns,
                   cells: cells,
                   occlusions: occlusions,
-                  tableIndex: tableIndex,
-                  initialRevealedCells: _revealedTableOcclusions[tableIndex] ?? {},
+                  tableIndex: indiceTabla,
+                  initialRevealedCells: _revealedTableOcclusions[indiceTabla] ?? {},
                   showAll: widget.showOcclusions,
                   onCellToggle: (cellIndex) {
                     setState(() {
-                      if (_revealedTableOcclusions[tableIndex] == null) {
-                        _revealedTableOcclusions[tableIndex] = {};
-                      }
-                      if (_revealedTableOcclusions[tableIndex]!.contains(cellIndex)) {
-                        _revealedTableOcclusions[tableIndex]!.remove(cellIndex);
+                      final reveladas = _revealedTableOcclusions.putIfAbsent(indiceTabla, () => {});
+                      if (reveladas.contains(cellIndex)) {
+                        reveladas.remove(cellIndex);
                       } else {
-                        _revealedTableOcclusions[tableIndex]!.add(cellIndex);
+                        reveladas.add(cellIndex);
                       }
                     });
                   },
@@ -511,12 +734,7 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
             );
             tableIndex++;
           } catch (e) {
-            children.add(
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text('Error al cargar tabla con oclusiones: $e'),
-              ),
-            );
+            children.add(errorEmbed('Error al cargar tabla con oclusiones: $e'));
           }
           continue;
         }
@@ -545,32 +763,47 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
         }
 
         if (imagePath != null) {
+          final ruta = imagePath;
           children.add(
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  File(imagePath),
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade200,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade400),
+              child: Center(
+                child: ConTamanoNatural(
+                  ruta: ruta,
+                  builder: (context, natural) => ConstrainedBox(
+                    // Nunca más del doble de su tamaño natural
+                    constraints: BoxConstraints(
+                      maxWidth: natural != null
+                          ? natural.width * TamanoImagen.factorMaximo
+                          : double.infinity,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(
+                        File(ruta),
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: cs.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: cs.outlineVariant),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.broken_image, color: cs.onSurfaceVariant),
+                                const SizedBox(height: 8),
+                                Text('Imagen no disponible\n$ruta',
+                                    style: TextStyle(color: cs.onSurfaceVariant)),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.broken_image, color: Colors.grey),
-                          const SizedBox(height: 8),
-                          Text('Imagen no disponible\n$imagePath'),
-                        ],
-                      ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -585,9 +818,9 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.amber.shade100,
+                color: cs.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber),
+                border: Border.all(color: cs.outlineVariant),
               ),
               child: Text('Contenido embebido no reconocido: ${insert.keys.join(", ")}'),
             ),
@@ -597,102 +830,118 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
       }
 
       // Manejar texto
-      final insertValue = insert;
-      final text = insertValue is String ? insertValue : '';
+      final text = insert is String ? insert : '';
 
-      // Verificar si es una oclusión
-      final isOcclusion = attributes != null && attributes['background'] == '#FFEB3B';
-
-      if (isOcclusion) {
+      // ¿Oclusión? Formato nuevo {"oclusion": true} o antiguo (fondo #FFEB3B)
+      if (OclusionTexto.esOclusion(attributes)) {
         final currentIndex = occlusionIndex;
         final isRevealed = _revealedOcclusions.contains(currentIndex);
+        final terminaLinea = text.endsWith('\n');
+        final visible = text.replaceAll('\n', ' ').trim();
 
-        textSpans.add(
+        lineaActual.add(
           WidgetSpan(
-            child: GestureDetector(
-              onTap: () => _toggleOcclusion(currentIndex),
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: isRevealed ? Colors.yellow.shade200 : Colors.orange.shade300,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color: isRevealed ? Colors.yellow.shade700 : Colors.orange.shade700,
-                    width: 1.5,
+            alignment: PlaceholderAlignment.middle,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => _toggleOcclusion(currentIndex),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    // Tapada: bloque naranja. Destapada: fondo muy suave con
+                    // borde sutil para saber dónde volver a hacer clic.
+                    color: isRevealed
+                        ? Colors.orange.withValues(alpha: 0.12)
+                        : Colors.orange.shade400,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: isRevealed
+                          ? Colors.orange.withValues(alpha: 0.55)
+                          : Colors.orange.shade700,
+                      width: isRevealed ? 1 : 1.5,
+                    ),
                   ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isRevealed ? Icons.visibility : Icons.visibility_off,
-                      size: 14,
-                      color: isRevealed ? Colors.yellow.shade900 : Colors.orange.shade900,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      isRevealed ? text : '█' * text.length.clamp(3, 15),
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: isRevealed ? Colors.black : Colors.orange.shade900,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isRevealed ? Icons.visibility : Icons.visibility_off,
+                        size: 14,
+                        color: isRevealed ? Colors.orange.shade700 : Colors.orange.shade900,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 4),
+                      Text(
+                        isRevealed ? visible : '█' * visible.length.clamp(3, 15),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isRevealed ? cs.onSurface : Colors.orange.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
         );
         occlusionIndex++;
-      } else {
-        // Aplicar estilos del texto normal
-        TextStyle style = const TextStyle(fontSize: 16);
+        if (terminaLinea) cerrarLinea(null);
+        continue;
+      }
 
-        if (attributes != null) {
-          if (attributes['bold'] == true) {
-            style = style.copyWith(fontWeight: FontWeight.bold);
-          }
-          if (attributes['italic'] == true) {
-            style = style.copyWith(fontStyle: FontStyle.italic);
-          }
-          if (attributes['underline'] == true) {
-            style = style.copyWith(decoration: TextDecoration.underline);
-          }
-          if (attributes['strike'] == true) {
-            style = style.copyWith(decoration: TextDecoration.lineThrough);
-          }
-          if (attributes['color'] != null) {
-            try {
-              final colorValue = attributes['color'] as String;
-              style = style.copyWith(
-                color: Color(int.parse(colorValue.replaceFirst('#', '0xFF'))),
-              );
-            } catch (_) {}
-          }
-          if (attributes['background'] != null && attributes['background'] != '#FFEB3B') {
-            try {
-              final bgColor = attributes['background'] as String;
-              style = style.copyWith(
-                backgroundColor: Color(int.parse(bgColor.replaceFirst('#', '0xFF'))),
-              );
-            } catch (_) {}
-          }
-          if (attributes['header'] != null) {
-            final headerLevel = attributes['header'] as int;
-            style = style.copyWith(
-              fontSize: headerLevel == 1 ? 32 : (headerLevel == 2 ? 24 : 20),
-              fontWeight: FontWeight.bold,
-            );
-          }
+      // Texto normal: estilos inline (sin tamaño fijo, para que el
+      // encabezado de la línea pueda imponer el suyo)
+      TextStyle style = const TextStyle();
+
+      if (attributes != null) {
+        if (attributes['bold'] == true) {
+          style = style.copyWith(fontWeight: FontWeight.bold);
         }
+        if (attributes['italic'] == true) {
+          style = style.copyWith(fontStyle: FontStyle.italic);
+        }
+        final decoraciones = <TextDecoration>[
+          if (attributes['underline'] == true) TextDecoration.underline,
+          if (attributes['strike'] == true) TextDecoration.lineThrough,
+        ];
+        if (decoraciones.isNotEmpty) {
+          style = style.copyWith(decoration: TextDecoration.combine(decoraciones));
+        }
+        if (attributes['code'] == true) {
+          style = style.merge(EstiloDocumento.codigoEnLinea(Theme.of(context)));
+        }
+        if (attributes['link'] is String) {
+          style = style.merge(EstiloDocumento.enlace(Theme.of(context)));
+        }
+        final color = _parseColorHex(attributes['color']);
+        if (color != null) style = style.copyWith(color: color);
+        final fondo = _parseColorHex(attributes['background']);
+        if (fondo != null) style = style.copyWith(backgroundColor: fondo);
+        final tam = attributes['size'];
+        final tamNum = tam is num ? tam.toDouble() : double.tryParse('$tam');
+        if (tamNum != null) style = style.copyWith(fontSize: tamNum);
+        final headerLevel = attributes['header'];
+        if (headerLevel is int && !text.contains('\n')) {
+          // Compatibilidad: algunos documentos traen el header en el texto
+          final t = EstiloDocumento.titulos[headerLevel.clamp(1, 6)]!;
+          style = style.copyWith(fontSize: t.tam, fontWeight: FontWeight.w700);
+        }
+      }
 
-        textSpans.add(TextSpan(text: text, style: style));
+      // Partir por líneas: el "\n" lleva los atributos de bloque de su línea
+      final partes = text.split('\n');
+      for (var i = 0; i < partes.length; i++) {
+        if (partes[i].isNotEmpty) {
+          lineaActual.add(TextSpan(text: partes[i], style: style));
+        }
+        if (i < partes.length - 1) cerrarLinea(attributes);
       }
     }
 
     // Flush any remaining text spans
-    _flushTextSpans();
+    flushTextSpans();
 
     // Calcular total de oclusiones (texto + imagen + LaTeX + tabla)
     final totalOcclusions = _occlusionCount + _imageOcclusionCount + _latexOcclusionCount + _tableOcclusionCount;
@@ -707,29 +956,43 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
         children: [
           if (totalOcclusions > 0 && !widget.showOcclusions) ...[
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: Colors.blue.shade50,
+                color: cs.secondaryContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.shade200),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                  Icon(Icons.info_outline, color: cs.onSecondaryContainer, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Haz click en cada bloque naranja para revelar el contenido oculto',
-                      style: TextStyle(color: Colors.blue.shade900),
+                      'Haz clic en cada bloque naranja para destaparlo',
+                      style: TextStyle(color: cs.onSecondaryContainer),
                     ),
                   ),
                   Text(
                     '$totalRevealed/$totalOcclusions',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.blue.shade900,
+                      color: cs.onSecondaryContainer,
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: totalRevealed >= totalOcclusions
+                        ? null
+                        : () => _ponerTodas(destapar: true),
+                    icon: const Icon(Icons.visibility, size: 18),
+                    label: const Text('Destapar todas'),
+                  ),
+                  TextButton.icon(
+                    onPressed: totalRevealed == 0
+                        ? null
+                        : () => _ponerTodas(destapar: false),
+                    icon: const Icon(Icons.visibility_off, size: 18),
+                    label: const Text('Tapar todas'),
                   ),
                 ],
               ),
@@ -749,9 +1012,9 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.purple.shade300, width: 2),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -760,23 +1023,23 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
             // Ecuación renderizada en Unicode (grande)
             SelectableText(
               processedText,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 28,
                 fontStyle: FontStyle.italic,
-                color: Colors.black87,
+                color: Theme.of(context).colorScheme.onSurface,
                 letterSpacing: 1.2,
                 height: 1.5,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
-            const Divider(color: Colors.purple, thickness: 1),
+            Divider(color: Theme.of(context).colorScheme.outlineVariant, thickness: 1),
             const SizedBox(height: 8),
             // LaTeX crudo (pequeño, para referencia)
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.functions, color: Colors.purple, size: 14),
+                Icon(Icons.functions, color: Theme.of(context).colorScheme.primary, size: 14),
                 const SizedBox(width: 6),
                 Flexible(
                   child: SelectableText(
@@ -784,7 +1047,7 @@ class _StudyDocumentViewerState extends State<StudyDocumentViewer> {
                     style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 11,
-                      color: Colors.grey.shade700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -827,7 +1090,12 @@ class _StudyImageWidget extends StatefulWidget {
   final bool showAll;
   final ValueChanged<int> onOcclusionToggle;
 
+  /// Tamaño natural guardado en el embed (si existe).
+  final Size? tamanoNatural;
+
   const _StudyImageWidget({
+    super.key,
+    this.tamanoNatural,
     required this.imagePath,
     required this.aspectRatio,
     required this.occlusions,
@@ -865,46 +1133,101 @@ class _StudyImageWidgetState extends State<_StudyImageWidget> {
   }
 
   @override
+  void didUpdateWidget(covariant _StudyImageWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Al ocultar de nuevo la respuesta, sincronizar con el estado del padre.
+    if (oldWidget.showAll && !widget.showAll) {
+      _revealedOcclusions = Set.from(widget.initialRevealedOcclusions);
+    }
+  }
+
+  void _abrirPantallaCompleta() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (context) => ImageFullscreenViewer(
+          imagePath: widget.imagePath,
+          annotations: widget.annotations,
+          drawings: widget.drawings,
+          occlusions: widget.occlusionsMap,
+          isStudyMode: true,
+          initialShowOcclusions: !widget.showAll,
+          initialShowAnnotations: true,
+          initialRevealedOcclusions: _revealedOcclusions,
+          onRevealedChanged: (nuevas) {
+            if (!mounted) return;
+            // Propagar al padre solo las oclusiones que cambiaron
+            final cambiadas = nuevas.difference(_revealedOcclusions)
+                .union(_revealedOcclusions.difference(nuevas));
+            setState(() => _revealedOcclusions = Set.from(nuevas));
+            for (final i in cambiadas) {
+              widget.onOcclusionToggle(i);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) {
-        // Adaptar al ancho disponible, con máximo de 800px
-        final maxWidth = ImageConstants.occlusionImageWidth;
-        final availableWidth = constraints.maxWidth - (ImageConstants.imageCenterPadding * 2);
-        final width = availableWidth < maxWidth ? availableWidth : maxWidth;
-        final height = width / widget.aspectRatio;
+      builder: (context, constraints) => ConTamanoNatural(
+        ruta: widget.imagePath,
+        conocido: widget.tamanoNatural,
+        builder: (context, natural) {
+        // Ancho de la columna de lectura, manteniendo la proporción; altura
+        // limitada para que quepa en pantalla y, como mucho, el doble del
+        // tamaño natural (las imágenes pequeñas no se estiran).
+        // Las oclusiones son coordenadas normalizadas (0-1), así que el
+        // tamaño de visualización no afecta a su posición.
+        final disponible = AnchoContenidoEstudio.of(context) ?? constraints.maxWidth;
+        final anchoMax = disponible < constraints.maxWidth ? disponible : constraints.maxWidth;
+        final altoMax = MediaQuery.of(context).size.height *
+            EstudioLayout.altoMaximoImagenFraccion;
+        final ratio = widget.aspectRatio > 0 ? widget.aspectRatio : 1.0;
+        final width = TamanoImagen.anchoMostrado(
+          anchoColumna: anchoMax,
+          aspectRatio: ratio,
+          altoMaximo: altoMax,
+          natural: natural,
+        );
+        final height = width / ratio;
 
         return Center(
           child: Padding(
-            padding: const EdgeInsets.all(ImageConstants.imageCenterPadding),
+            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 SizedBox(
                   width: width,
                   height: height,
-                  child: GestureDetector(
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
                     onTapUp: (details) {
-                      if (widget.showAll) return;
-
                       final tapPosition = details.localPosition;
 
                       // Encontrar qué oclusión se tocó (usando coordenadas directas)
-                      for (int i = 0; i < widget.occlusions.length; i++) {
-                        final occ = widget.occlusions[i];
-                        // Convertir coordenadas normalizadas a absolutas
-                        final occRect = Rect.fromLTRB(
-                          occ.left * width,
-                          occ.top * height,
-                          occ.right * width,
-                          occ.bottom * height,
-                        );
+                      if (!widget.showAll) {
+                        for (int i = 0; i < widget.occlusions.length; i++) {
+                          final occ = widget.occlusions[i];
+                          final occRect = Rect.fromLTRB(
+                            occ.left * width,
+                            occ.top * height,
+                            occ.right * width,
+                            occ.bottom * height,
+                          );
 
-                        if (occRect.contains(tapPosition)) {
-                          _toggleOcclusion(i);
-                          break;
+                          if (occRect.contains(tapPosition)) {
+                            _toggleOcclusion(i);
+                            return;
+                          }
                         }
                       }
+                      // Clic fuera de las tapas: abrir a pantalla completa
+                      _abrirPantallaCompleta();
                     },
                     child: Stack(
                       children: [
@@ -915,10 +1238,12 @@ class _StudyImageWidgetState extends State<_StudyImageWidget> {
                           height: height,
                           fit: BoxFit.fill,
                           errorBuilder: (context, error, stackTrace) {
+                            final cs = Theme.of(context).colorScheme;
                             return Container(
                               padding: const EdgeInsets.all(16),
-                              color: Colors.grey.shade200,
-                              child: const Text('Imagen no disponible'),
+                              color: cs.surfaceContainerHighest,
+                              child: Text('Imagen no disponible',
+                                  style: TextStyle(color: cs.onSurfaceVariant)),
                             );
                           },
                         ),
@@ -932,7 +1257,7 @@ class _StudyImageWidgetState extends State<_StudyImageWidget> {
                                 occlusions: widget.occlusions,
                                 revealedIndices: widget.showAll
                                     ? Set.from(List.generate(widget.occlusions.length, (i) => i))
-                                    : _revealedOcclusions,
+                                    : Set.from(_revealedOcclusions),
                                 imageSize: Size(width, height),
                               ),
                             ),
@@ -940,40 +1265,32 @@ class _StudyImageWidgetState extends State<_StudyImageWidget> {
                       ],
                     ),
                   ),
+                  ),
                 ),
-                const SizedBox(height: 8),
-                // Botón de fullscreen para ampliar con zoom
-                SizedBox(
-                  width: width,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.fullscreen, size: 20),
-                    label: const Text('Ver en pantalla completa'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          fullscreenDialog: true,
-                          builder: (context) => ImageFullscreenViewer(
-                            imagePath: widget.imagePath,
-                            annotations: widget.annotations,
-                            drawings: widget.drawings,
-                            occlusions: widget.occlusionsMap,
-                            isStudyMode: true,
-                            initialShowOcclusions: !widget.showAll,
-                            initialShowAnnotations: true,
-                          ),
+                // Acción compacta (ahorra altura frente al antiguo botón ancho)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: SizedBox(
+                    width: width,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.fullscreen, size: 18),
+                        label: const Text('Pantalla completa (clic en la imagen)'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
                         ),
-                      );
-                    },
+                        onPressed: _abrirPantallaCompleta,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
         );
-      },
+        },
+      ),
     );
   }
 }
@@ -1007,15 +1324,17 @@ class _OcclusionOverlayPainter extends CustomPainter {
       // Pintar fondo de oclusión (100% opaco cuando está oculto)
       final fillPaint = Paint()
         ..color = isRevealed
-            ? Colors.yellow.withOpacity(0.3)
+            ? Colors.orange.withValues(alpha: 0.08)
             : Colors.orange  // Sin transparencia para cubrir completamente
         ..style = PaintingStyle.fill;
 
-      // Pintar borde
+      // Borde: destapada = borde sutil para saber dónde volver a hacer clic
       final borderPaint = Paint()
-        ..color = isRevealed ? Colors.yellow.shade700 : Colors.orange.shade700
+        ..color = isRevealed
+            ? Colors.orange.withValues(alpha: 0.7)
+            : Colors.orange.shade700
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2;
+        ..strokeWidth = isRevealed ? 1.5 : 2;
 
       canvas.drawRect(rect, fillPaint);
       canvas.drawRect(rect, borderPaint);
@@ -1043,7 +1362,8 @@ class _OcclusionOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_OcclusionOverlayPainter oldDelegate) {
-    return revealedIndices != oldDelegate.revealedIndices ||
+    return !setEquals(revealedIndices, oldDelegate.revealedIndices) ||
+        occlusions != oldDelegate.occlusions ||
         imageSize != oldDelegate.imageSize;
   }
 }
@@ -1058,6 +1378,7 @@ class _StudyLatexWidget extends StatefulWidget {
   final ValueChanged<int> onOcclusionToggle;
 
   const _StudyLatexWidget({
+    super.key,
     required this.latexCode,
     required this.occlusions,
     required this.latexIndex,
@@ -1109,7 +1430,7 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
           // Reemplazar el texto oculto con un placeholder
           final before = displayCode.substring(0, occlusion.start);
           final after = displayCode.substring(occlusion.end);
-          displayCode = before + '\\boxed{?}' + after;
+          displayCode = '$before\\boxed{?}$after';
         }
       }
     }
@@ -1117,10 +1438,10 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.purple.shade50,
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: widget.occlusions.isNotEmpty ? Colors.orange : Colors.purple.shade200,
+          color: widget.occlusions.isNotEmpty ? Colors.orange : Theme.of(context).colorScheme.outlineVariant,
           width: widget.occlusions.isNotEmpty ? 2 : 1,
         ),
       ),
@@ -1147,11 +1468,11 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: isRevealed ? Colors.yellow.shade200 : Colors.orange,
+                      color: isRevealed ? Colors.orange.withValues(alpha: 0.12) : Colors.orange,
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(
-                        color: isRevealed ? Colors.yellow.shade700 : Colors.orange.shade700,
-                        width: 2,
+                        color: isRevealed ? Colors.orange.withValues(alpha: 0.6) : Colors.orange.shade700,
+                        width: isRevealed ? 1 : 2,
                       ),
                     ),
                     child: Row(
@@ -1160,14 +1481,14 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
                         Icon(
                           isRevealed ? Icons.visibility : Icons.visibility_off,
                           size: 16,
-                          color: isRevealed ? Colors.yellow.shade900 : Colors.white,
+                          color: isRevealed ? Colors.orange.shade700 : Colors.white,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           '${index + 1}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: isRevealed ? Colors.yellow.shade900 : Colors.white,
+                            color: isRevealed ? Theme.of(context).colorScheme.onSurface : Colors.white,
                           ),
                         ),
                       ],
@@ -1190,7 +1511,7 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
@@ -1200,23 +1521,23 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
             // Ecuación renderizada en Unicode (grande)
             SelectableText(
               processedText,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 28,
                 fontStyle: FontStyle.italic,
-                color: Colors.black87,
+                color: Theme.of(context).colorScheme.onSurface,
                 letterSpacing: 1.2,
                 height: 1.5,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
-            const Divider(color: Colors.purple, thickness: 1),
+            Divider(color: Theme.of(context).colorScheme.outlineVariant, thickness: 1),
             const SizedBox(height: 8),
             // LaTeX crudo (pequeño, para referencia)
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.functions, color: Colors.purple, size: 14),
+                Icon(Icons.functions, color: Theme.of(context).colorScheme.primary, size: 14),
                 const SizedBox(width: 6),
                 Flexible(
                   child: SelectableText(
@@ -1224,7 +1545,7 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
                     style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 11,
-                      color: Colors.grey.shade700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -1268,6 +1589,14 @@ class _StudyLatexWidgetState extends State<_StudyLatexWidget> {
   }
 }
 
+/// Texto de una celda (tolerante a filas/columnas incompletas).
+String _celdaEstudio(List<List<String>> cells, int fila, int col) {
+  if (fila < 0 || fila >= cells.length) return '';
+  final f = cells[fila];
+  if (col < 0 || col >= f.length) return '';
+  return f[col];
+}
+
 /// Widget para mostrar tablas con oclusiones en modo estudio
 class _StudyTableWidget extends StatefulWidget {
   final int rows;
@@ -1280,6 +1609,7 @@ class _StudyTableWidget extends StatefulWidget {
   final ValueChanged<int> onCellToggle;
 
   const _StudyTableWidget({
+    super.key,
     required this.rows,
     required this.columns,
     required this.cells,
@@ -1320,10 +1650,11 @@ class _StudyTableWidgetState extends State<_StudyTableWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
         border: Border.all(
-          color: widget.occlusions.isNotEmpty ? Colors.orange : Colors.grey.shade400,
+          color: widget.occlusions.isNotEmpty ? Colors.orange : cs.outline,
           width: widget.occlusions.isNotEmpty ? 2 : 1,
         ),
         borderRadius: BorderRadius.circular(8),
@@ -1333,7 +1664,7 @@ class _StudyTableWidgetState extends State<_StudyTableWidget> {
         children: [
           // Tabla
           Table(
-            border: TableBorder.all(color: Colors.grey.shade300),
+            border: TableBorder.all(color: cs.outlineVariant),
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
             children: List.generate(
               widget.rows,
@@ -1351,23 +1682,31 @@ class _StudyTableWidgetState extends State<_StudyTableWidget> {
                       onTap: isOccluded && !widget.showAll ? () => _toggleCell(cellIndex) : null,
                       child: Container(
                         padding: const EdgeInsets.all(12),
-                        color: isOccluded && !isRevealed
-                            ? Colors.orange.shade100
-                            : null,
+                        // Tapada: fondo naranja suave. Destapada: borde sutil.
+                        decoration: isOccluded
+                            ? BoxDecoration(
+                                color: !isRevealed
+                                    ? Colors.orange.withValues(alpha: 0.18)
+                                    : Colors.orange.withValues(alpha: 0.05),
+                                border: Border.all(
+                                  color: Colors.orange.withValues(alpha: isRevealed ? 0.45 : 0.8),
+                                ),
+                              )
+                            : (rowIndex == 0
+                                ? BoxDecoration(color: cs.surfaceContainerHighest)
+                                : null),
                         child: Center(
                           child: isOccluded && !isRevealed
-                              ? const Text(
+                              ? Text(
                                   '[?]',
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.orange,
+                                    color: Colors.orange.shade700,
                                   ),
                                 )
                               : Text(
-                                  widget.cells[rowIndex][colIndex].isEmpty
-                                      ? (rowIndex == 0 ? 'Col ${colIndex + 1}' : '')
-                                      : widget.cells[rowIndex][colIndex],
+                                  _celdaEstudio(widget.cells, rowIndex, colIndex),
                                   style: TextStyle(
                                     fontWeight: rowIndex == 0 ? FontWeight.bold : FontWeight.normal,
                                   ),
@@ -1392,7 +1731,6 @@ class _StudyTableWidgetState extends State<_StudyTableWidget> {
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
                 children: widget.occlusions.asMap().entries.map((entry) {
-                  final index = entry.key;
                   final occlusion = entry.value;
                   final cellIndex = _getCellIndex(occlusion.row, occlusion.col);
                   final isRevealed = _revealedCells.contains(cellIndex);
@@ -1403,7 +1741,9 @@ class _StudyTableWidgetState extends State<_StudyTableWidget> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: isRevealed ? Colors.green.shade100 : Colors.orange.shade100,
+                        color: isRevealed
+                            ? Colors.green.withValues(alpha: 0.15)
+                            : Colors.orange.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(
                           color: isRevealed ? Colors.green : Colors.orange,

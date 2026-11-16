@@ -1,4 +1,7 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/srs/sm2.dart';
+
+export '../../../../core/srs/sm2.dart' show EstadoSrs, CalificacionSrs;
 
 /// Entidad de Documento/Nota
 /// Representa un documento completo con contenido rico en formato Delta (Quill)
@@ -15,6 +18,9 @@ class Note extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Estado del repaso espaciado (SM-2). Por defecto: nota nueva.
+  final EstadoSrs srs;
+
   const Note({
     required this.id,
     required this.courseId,
@@ -26,6 +32,7 @@ class Note extends Equatable {
     this.imageOcclusions = const [],
     required this.createdAt,
     required this.updatedAt,
+    this.srs = EstadoSrs.nueva,
   });
 
   Note copyWith({
@@ -39,6 +46,7 @@ class Note extends Equatable {
     List<ImageOcclusion>? imageOcclusions,
     DateTime? createdAt,
     DateTime? updatedAt,
+    EstadoSrs? srs,
   }) {
     return Note(
       id: id ?? this.id,
@@ -51,6 +59,7 @@ class Note extends Equatable {
       imageOcclusions: imageOcclusions ?? this.imageOcclusions,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      srs: srs ?? this.srs,
     );
   }
 
@@ -66,6 +75,7 @@ class Note extends Equatable {
         imageOcclusions,
         createdAt,
         updatedAt,
+        srs,
       ];
 }
 

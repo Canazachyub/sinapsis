@@ -1,10 +1,19 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
+import 'package:flutter_quill/quill_delta.dart' show Delta;
 import 'package:image_picker/image_picker.dart';
+// file_selector_platform_interface llega como dependencia de image_picker;
+// se usa directamente para poder fijar carpeta inicial y botón "Abrir".
+// ignore: depend_on_referenced_packages
+import 'package:file_selector_platform_interface/file_selector_platform_interface.dart'
+    show FileSelectorPlatform, XTypeGroup;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:desktop_drop/desktop_drop.dart';
@@ -14,9 +23,16 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:sinapsis/core/constants/image_constants.dart';
 import 'package:sinapsis/core/constants/keyboard_shortcuts.dart';
+import 'package:sinapsis/core/services/estudio_preferencias.dart';
 import 'package:sinapsis/core/utils/markdown_to_quill.dart';
-import 'package:sinapsis/core/utils/quill_to_markdown.dart';
 import 'package:sinapsis/core/utils/clipboard_handler.dart';
+import 'package:sinapsis/core/utils/html_to_quill.dart';
+import 'barra_editor.dart';
+import 'barra_estado_editor.dart';
+import 'esquema_documento.dart';
+import 'estilos_documento.dart';
+import 'estudio_comodo.dart';
+import 'formato_editor.dart';
 import 'image_occlusion_editor.dart';
 import 'image_annotation_editor.dart';
 import 'image_fullscreen_viewer.dart';
@@ -128,31 +144,45 @@ class ImageEmbedBuilder extends quill.EmbedBuilder {
     final node = embedContext.node;
     final imageUrl = node.value.data;
 
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.file(
-          File(imageUrl),
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade400),
+      child: Center(
+        child: ConTamanoNatural(
+          ruta: imageUrl,
+          builder: (context, natural) => ConstrainedBox(
+            // Nunca más del doble de su tamaño natural (no estirar miniaturas)
+            constraints: BoxConstraints(
+              maxWidth: natural != null
+                  ? natural.width * TamanoImagen.factorMaximo
+                  : double.infinity,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(
+                File(imageUrl),
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: cs.outlineVariant),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.broken_image, color: cs.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Text('Imagen no disponible', style: TextStyle(color: cs.onSurfaceVariant)),
+                      ],
+                    ),
+                  );
+                },
               ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.broken_image, color: Colors.grey),
-                  SizedBox(width: 8),
-                  Text('Imagen no disponible'),
-                ],
-              ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );
@@ -160,6 +190,53 @@ class ImageEmbedBuilder extends quill.EmbedBuilder {
 }
 
 /// Custom embed builder for images with occlusions
+/// Convierte una oclusión serializada ({left, top, right, bottom} en
+/// coordenadas normalizadas) a [Rect], limitando cada valor a [0, 1].
+///
+/// Ficheros externos (p. ej. el anotador de pantalla) pueden traer valores
+/// ligeramente fuera de rango (top = 1.03); sin el clamp el rectángulo se
+/// pintaría fuera de la imagen.
+Rect rectOclusionNormalizado(Map<String, dynamic> oMap) {
+  double leer(String clave) =>
+      ((oMap[clave] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0);
+  return Rect.fromLTRB(leer('left'), leer('top'), leer('right'), leer('bottom'));
+}
+
+/// Posición en el documento del embed `image_occluded` representado por
+/// [node]. Usa el offset del nodo y, si no cuadra (el documento cambió),
+/// busca por ruta de imagen. Devuelve -1 si no lo encuentra.
+int _offsetEmbedImagen(quill.QuillController controller, quill.Node node, String imagePath) {
+  bool esLaImagen(Object? data) {
+    if (data is! Map || !data.containsKey('image_occluded')) return false;
+    try {
+      final d = jsonDecode(data['image_occluded'] as String) as Map<String, dynamic>;
+      return d['path'] == imagePath;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  final ops = controller.document.toDelta().toList();
+  try {
+    final offset = node.documentOffset;
+    var pos = 0;
+    for (final op in ops) {
+      if (pos == offset) {
+        if (esLaImagen(op.data)) return offset;
+        break;
+      }
+      if (pos > offset) break;
+      pos += op.length ?? 1;
+    }
+  } catch (_) {}
+  var pos = 0;
+  for (final op in ops) {
+    if (esLaImagen(op.data)) return pos;
+    pos += op.length ?? 1;
+  }
+  return -1;
+}
+
 class ImageOccludedEmbedBuilder extends quill.EmbedBuilder {
   const ImageOccludedEmbedBuilder();
 
@@ -184,12 +261,7 @@ class ImageOccludedEmbedBuilder extends quill.EmbedBuilder {
 
       final occlusions = occlusionsData?.map((o) {
         final oMap = o as Map<String, dynamic>;
-        return Rect.fromLTRB(
-          (oMap['left'] as num).toDouble(),
-          (oMap['top'] as num).toDouble(),
-          (oMap['right'] as num).toDouble(),
-          (oMap['bottom'] as num).toDouble(),
-        );
+        return rectOclusionNormalizado(oMap);
       }).toList() ?? [];
 
       final annotations = annotationsData?.map((a) => a as Map<String, dynamic>).toList() ?? [];
@@ -211,7 +283,42 @@ class ImageOccludedEmbedBuilder extends quill.EmbedBuilder {
           occlusions: occlusions,
           annotations: annotations,
           drawings: drawings,
-          onEditOcclusions: null, // Funcionalidad existente mantenida
+          tamanoNatural: ConTamanoNatural.desdeDatos(data),
+          // Editar (o añadir) oclusiones de una imagen ya insertada
+          onEditOcclusions: readOnly ? null : () async {
+            final nuevas = await ImageOcclusionEditor.open(
+              context,
+              imagePath: imagePath,
+              aspectRatio: aspectRatio,
+              initialOcclusions: occlusions,
+            );
+            if (nuevas == null) return;
+            final offset = _offsetEmbedImagen(controller, node, imagePath);
+            if (offset < 0) return;
+            final datosNuevos = <String, dynamic>{
+              ...data,
+              'occlusions': nuevas.map((r) => {
+                'left': r.left,
+                'top': r.top,
+                'right': r.right,
+                'bottom': r.bottom,
+              }).toList(),
+            };
+            controller.replaceText(
+              offset,
+              1,
+              quill.BlockEmbed('image_occluded', jsonEncode(datosNuevos)),
+              TextSelection.collapsed(offset: offset + 1),
+            );
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Oclusiones actualizadas: ${nuevas.length}'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+          },
           onEditAnnotations: readOnly ? null : () async {
             // Añadir/editar anotaciones
             final result = await showDialog<Map<String, dynamic>>(
@@ -318,13 +425,19 @@ class ImageOccludedEmbedBuilder extends quill.EmbedBuilder {
 
               if (embedIndex != -1) {
                 // Crear nuevo embed con imagen modificada
-                final updatedData = {
+                final updatedData = <String, dynamic>{
+                  ...data, // conserva width/height y otros campos
                   'path': finalImagePath, // Usar la imagen con anotaciones
                   'aspectRatio': aspectRatio,
                   'occlusions': occlusionsData,
                   'annotations': newAnnotations,
                   'drawings': newDrawings,
                 };
+                if (finalImagePath != imagePath) {
+                  // La imagen anotada puede tener otro tamaño en píxeles
+                  updatedData.remove('width');
+                  updatedData.remove('height');
+                }
                 debugPrint('updatedData path: ${updatedData['path']}');
 
                 // Reemplazar el embed
@@ -425,9 +538,9 @@ class LatexEmbedBuilder extends quill.EmbedBuilder {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.purple.shade50,
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.purple.shade200),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: Center(
           child: _buildLatexWidget(latexCode, context),
@@ -443,9 +556,9 @@ class LatexEmbedBuilder extends quill.EmbedBuilder {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.purple.shade300, width: 2),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -454,23 +567,23 @@ class LatexEmbedBuilder extends quill.EmbedBuilder {
             // Ecuación renderizada en Unicode (grande)
             SelectableText(
               processedText,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 28,
                 fontStyle: FontStyle.italic,
-                color: Colors.black87,
+                color: Theme.of(context).colorScheme.onSurface,
                 letterSpacing: 1.2,
                 height: 1.5,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
-            const Divider(color: Colors.purple, thickness: 1),
+            Divider(color: Theme.of(context).colorScheme.outlineVariant, thickness: 1),
             const SizedBox(height: 8),
             // LaTeX crudo (pequeño, para referencia)
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.functions, color: Colors.purple, size: 14),
+                Icon(Icons.functions, color: Theme.of(context).colorScheme.primary, size: 14),
                 const SizedBox(width: 6),
                 Flexible(
                   child: SelectableText(
@@ -478,7 +591,7 @@ class LatexEmbedBuilder extends quill.EmbedBuilder {
                     style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 11,
-                      color: Colors.grey.shade700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -535,6 +648,8 @@ class LatexOccludedEmbedBuilder extends quill.EmbedBuilder {
     quill.EmbedContext embedContext,
   ) {
     final node = embedContext.node;
+    final controller = embedContext.controller;
+    final readOnly = embedContext.readOnly;
     try {
       final data = jsonDecode(node.value.data) as Map<String, dynamic>;
       final latexCode = data['code'] as String;
@@ -550,7 +665,27 @@ class LatexOccludedEmbedBuilder extends quill.EmbedBuilder {
         child: _OccludedLatexWidget(
           latexCode: latexCode,
           occlusions: occlusions,
-          onEditOcclusions: null,
+          onEditOcclusions: readOnly ? null : () async {
+            final result = await showDialog<List<LatexOcclusion>>(
+              context: context,
+              builder: (context) => LatexOcclusionEditor(
+                latexCode: latexCode,
+                initialOcclusions: occlusions,
+              ),
+            );
+            if (result == null) return;
+            final offset = node.documentOffset;
+            final nuevo = <String, dynamic>{
+              ...data,
+              'occlusions': result.map((o) => o.toJson()).toList(),
+            };
+            controller.replaceText(
+              offset,
+              1,
+              quill.BlockEmbed('latex_occluded', jsonEncode(nuevo)),
+              TextSelection.collapsed(offset: offset + 1),
+            );
+          },
         ),
       );
     } catch (e) {
@@ -591,10 +726,10 @@ class _OccludedLatexWidget extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.purple.shade50,
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: occlusions.isNotEmpty ? Colors.orange : Colors.purple.shade200,
+          color: occlusions.isNotEmpty ? Colors.orange : Theme.of(context).colorScheme.outlineVariant,
           width: occlusions.isNotEmpty ? 2 : 1,
         ),
       ),
@@ -624,7 +759,7 @@ class _OccludedLatexWidget extends StatelessWidget {
                         const Icon(Icons.visibility_off, size: 16, color: Colors.white),
                         const SizedBox(width: 4),
                         Text(
-                          '${occlusions.length} oclusiones',
+                          textoOclusiones(occlusions.length),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 12,
@@ -654,7 +789,7 @@ class _OccludedLatexWidget extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
@@ -664,23 +799,23 @@ class _OccludedLatexWidget extends StatelessWidget {
             // Ecuación renderizada en Unicode (grande)
             SelectableText(
               processedText,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 28,
                 fontStyle: FontStyle.italic,
-                color: Colors.black87,
+                color: Theme.of(context).colorScheme.onSurface,
                 letterSpacing: 1.2,
                 height: 1.5,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
-            const Divider(color: Colors.purple, thickness: 1),
+            Divider(color: Theme.of(context).colorScheme.outlineVariant, thickness: 1),
             const SizedBox(height: 8),
             // LaTeX crudo (pequeño, para referencia)
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.functions, color: Colors.purple, size: 14),
+                Icon(Icons.functions, color: Theme.of(context).colorScheme.primary, size: 14),
                 const SizedBox(width: 6),
                 Flexible(
                   child: SelectableText(
@@ -688,7 +823,7 @@ class _OccludedLatexWidget extends StatelessWidget {
                     style: TextStyle(
                       fontFamily: 'monospace',
                       fontSize: 11,
-                      color: Colors.grey.shade700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -730,6 +865,23 @@ class _OccludedLatexWidget extends StatelessWidget {
       );
     }
   }
+}
+
+/// Sustituye el embed representado por [node] por uno nuevo del [tipo] dado
+/// y deja el cursor justo después.
+void _reemplazarEmbedEnNodo(
+  quill.QuillController controller,
+  quill.Node node,
+  String tipo,
+  Map<String, dynamic> datos,
+) {
+  final offset = node.documentOffset;
+  controller.replaceText(
+    offset,
+    1,
+    quill.BlockEmbed(tipo, jsonEncode(datos)),
+    TextSelection.collapsed(offset: offset + 1),
+  );
 }
 
 /// Custom embed builder for tables
@@ -780,24 +932,9 @@ class TableEmbedBuilder extends quill.EmbedBuilder {
                 'cells': result['cells'],
               };
 
-              // Encontrar el índice del embed actual
-              final delta = controller.document.toDelta();
-              int currentIndex = 0;
-              for (var op in delta.toList()) {
-                if (op.data is Map &&
-                    (op.data as Map).containsKey('table') &&
-                    jsonDecode((op.data as Map)['table']) == data) {
-                  // Reemplazar el embed
-                  controller.replaceText(
-                    currentIndex,
-                    1,
-                    quill.BlockEmbed('table', jsonEncode(newData)),
-                    null,
-                  );
-                  break;
-                }
-                currentIndex += op.length ?? 1;
-              }
+              // Reemplazar en la posición del propio nodo (antes se comparaban
+              // mapas por identidad y la edición no se guardaba nunca).
+              _reemplazarEmbedEnNodo(controller, node, 'table', newData);
             }
           },
           onAddOcclusions: readOnly ? null : () async {
@@ -821,42 +958,7 @@ class TableEmbedBuilder extends quill.EmbedBuilder {
                 'occlusions': result.map((o) => o.toJson()).toList(),
               };
 
-              print('📊 GUARDANDO tabla con ${result.length} oclusiones');
-              print('📊 Datos: ${jsonEncode(newData)}');
-
-              // Encontrar y reemplazar con table_occluded
-              final delta = controller.document.toDelta();
-              int currentIndex = 0;
-              bool found = false;
-              for (var op in delta.toList()) {
-                if (op.data is Map && (op.data as Map).containsKey('table')) {
-                  try {
-                    final tableData = jsonDecode((op.data as Map)['table']) as Map<String, dynamic>;
-                    // Comparar por contenido de celdas en lugar de referencia de objeto
-                    final tableCells = jsonEncode(tableData['cells']);
-                    final dataCells = jsonEncode(data['cells']);
-
-                    if (tableCells == dataCells) {
-                      print('📊 ¡Tabla encontrada! Reemplazando con table_occluded en índice $currentIndex');
-                      controller.replaceText(
-                        currentIndex,
-                        1,
-                        quill.BlockEmbed('table_occluded', jsonEncode(newData)),
-                        null,
-                      );
-                      found = true;
-                      break;
-                    }
-                  } catch (e) {
-                    print('⚠️ Error comparando tabla: $e');
-                  }
-                }
-                currentIndex += op.length ?? 1;
-              }
-              if (!found) {
-                print('⚠️ NO se encontró la tabla para reemplazar!');
-                print('⚠️ Buscando cells: ${jsonEncode(data['cells'])}');
-              }
+              _reemplazarEmbedEnNodo(controller, node, 'table_occluded', newData);
             }
           },
         ),
@@ -882,6 +984,62 @@ class TableEmbedBuilder extends quill.EmbedBuilder {
   }
 }
 
+/// Texto de una celda (tolerante a tablas con filas/columnas incompletas).
+String _celda(List<List<String>> cells, int fila, int col) {
+  if (fila < 0 || fila >= cells.length) return '';
+  final f = cells[fila];
+  if (col < 0 || col >= f.length) return '';
+  return f[col];
+}
+
+/// Texto que se muestra en el editor para una celda: si un encabezado está
+/// vacío se muestra "Encabezado N" atenuado (lo mismo que sugiere el diálogo).
+Widget _textoCeldaEditor(BuildContext context, List<List<String>> cells, int fila, int col) {
+  final texto = _celda(cells, fila, col);
+  final cs = Theme.of(context).colorScheme;
+  if (texto.isEmpty && fila == 0) {
+    return Text(
+      'Encabezado ${col + 1}',
+      style: TextStyle(
+        fontWeight: FontWeight.bold,
+        fontStyle: FontStyle.italic,
+        color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+      ),
+    );
+  }
+  return Text(
+    texto,
+    style: TextStyle(fontWeight: fila == 0 ? FontWeight.bold : FontWeight.normal),
+  );
+}
+
+/// Botón pequeño de acción sobre una tabla (fuera de las celdas, para no
+/// tapar el contenido del encabezado).
+Widget _botonTabla(
+  BuildContext context, {
+  required IconData icono,
+  required String texto,
+  required VoidCallback onTap,
+  bool destacado = false,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(left: 6),
+    child: destacado
+        ? FilledButton.tonalIcon(
+            onPressed: onTap,
+            icon: Icon(icono, size: 16),
+            label: Text(texto),
+            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+          )
+        : OutlinedButton.icon(
+            onPressed: onTap,
+            icon: Icon(icono, size: 16),
+            label: Text(texto),
+            style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+          ),
+  );
+}
+
 /// Widget para mostrar tabla
 class _TableWidget extends StatelessWidget {
   final int rows;
@@ -902,106 +1060,51 @@ class _TableWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
+        if (!readOnly && (onEdit != null || onAddOcclusions != null))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (onAddOcclusions != null)
+                  _botonTabla(context,
+                      icono: Icons.visibility_off, texto: 'Oclusiones', onTap: onAddOcclusions!),
+                if (onEdit != null)
+                  _botonTabla(context,
+                      icono: Icons.edit, texto: 'Editar tabla', onTap: onEdit!, destacado: true),
+              ],
+            ),
+          ),
         Container(
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade400),
+            border: Border.all(color: cs.outline),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Table(
-            border: TableBorder.all(color: Colors.grey.shade300),
+            border: TableBorder.all(color: cs.outlineVariant),
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
             children: List.generate(
               rows,
               (rowIndex) => TableRow(
+                decoration: rowIndex == 0
+                    ? BoxDecoration(color: cs.surfaceContainerHighest)
+                    : null,
                 children: List.generate(
                   columns,
                   (colIndex) => Container(
                     padding: const EdgeInsets.all(8),
-                    child: Text(
-                      cells[rowIndex][colIndex].isEmpty
-                          ? (rowIndex == 0 ? 'Col ${colIndex + 1}' : '')
-                          : cells[rowIndex][colIndex],
-                      style: TextStyle(
-                        fontWeight: rowIndex == 0 ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
+                    child: _textoCeldaEditor(context, cells, rowIndex, colIndex),
                   ),
                 ),
               ),
             ),
           ),
         ),
-        if (!readOnly && onEdit != null)
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onEdit,
-                borderRadius: BorderRadius.circular(4),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.teal,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.edit, size: 16, color: Colors.white),
-                      SizedBox(width: 4),
-                      Text(
-                        'Editar',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        // Botón para agregar oclusiones
-        if (!readOnly && onAddOcclusions != null)
-          Positioned(
-            top: 8,
-            right: onEdit != null ? 80 : 8,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onAddOcclusions,
-                borderRadius: BorderRadius.circular(4),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Oclusiones',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(width: 4),
-                      Icon(Icons.visibility_off, size: 16, color: Colors.white),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
       ],
     );
   }
@@ -1062,23 +1165,7 @@ class TableOccludedEmbedBuilder extends quill.EmbedBuilder {
                 'occlusions': occlusions.map((o) => o.toJson()).toList(),
               };
 
-              // Encontrar y reemplazar el embed actual
-              final delta = controller.document.toDelta();
-              int currentIndex = 0;
-              for (var op in delta.toList()) {
-                if (op.data is Map &&
-                    (op.data as Map).containsKey('table_occluded') &&
-                    jsonDecode((op.data as Map)['table_occluded']) == data) {
-                  controller.replaceText(
-                    currentIndex,
-                    1,
-                    quill.BlockEmbed('table_occluded', jsonEncode(newData)),
-                    null,
-                  );
-                  break;
-                }
-                currentIndex += op.length ?? 1;
-              }
+              _reemplazarEmbedEnNodo(controller, node, 'table_occluded', newData);
             }
           },
           onEditOcclusions: readOnly ? null : () async {
@@ -1100,23 +1187,7 @@ class TableOccludedEmbedBuilder extends quill.EmbedBuilder {
                 'occlusions': result.map((o) => o.toJson()).toList(),
               };
 
-              // Encontrar y reemplazar el embed actual
-              final delta = controller.document.toDelta();
-              int currentIndex = 0;
-              for (var op in delta.toList()) {
-                if (op.data is Map &&
-                    (op.data as Map).containsKey('table_occluded') &&
-                    jsonDecode((op.data as Map)['table_occluded']) == data) {
-                  controller.replaceText(
-                    currentIndex,
-                    1,
-                    quill.BlockEmbed('table_occluded', jsonEncode(newData)),
-                    null,
-                  );
-                  break;
-                }
-                currentIndex += op.length ?? 1;
-              }
+              _reemplazarEmbedEnNodo(controller, node, 'table_occluded', newData);
             }
           },
         ),
@@ -1164,22 +1235,45 @@ class _OccludedTableWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
+        if (!readOnly && (onEdit != null || onEditOcclusions != null))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (onEditOcclusions != null)
+                  _botonTabla(context,
+                      icono: Icons.visibility_off,
+                      texto: occlusions.isEmpty ? 'Oclusiones' : textoOclusiones(occlusions.length),
+                      onTap: onEditOcclusions!),
+                if (onEdit != null)
+                  _botonTabla(context,
+                      icono: Icons.edit, texto: 'Editar tabla', onTap: onEdit!, destacado: true),
+              ],
+            ),
+          ),
         Container(
           decoration: BoxDecoration(
             border: Border.all(
-              color: occlusions.isNotEmpty ? Colors.orange : Colors.grey.shade400,
+              color: occlusions.isNotEmpty ? Colors.orange : cs.outline,
               width: occlusions.isNotEmpty ? 2 : 1,
             ),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Table(
-            border: TableBorder.all(color: Colors.grey.shade300),
+            border: TableBorder.all(color: cs.outlineVariant),
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
             children: List.generate(
               rows,
               (rowIndex) => TableRow(
+                decoration: rowIndex == 0
+                    ? BoxDecoration(color: cs.surfaceContainerHighest)
+                    : null,
                 children: List.generate(
                   columns,
                   (colIndex) {
@@ -1188,24 +1282,17 @@ class _OccludedTableWidget extends StatelessWidget {
                     );
                     return Container(
                       padding: const EdgeInsets.all(8),
-                      color: isOccluded ? Colors.orange.shade100 : null,
+                      color: isOccluded ? Colors.orange.withValues(alpha: 0.18) : null,
                       child: Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              cells[rowIndex][colIndex].isEmpty
-                                  ? (rowIndex == 0 ? 'Col ${colIndex + 1}' : '')
-                                  : cells[rowIndex][colIndex],
-                              style: TextStyle(
-                                fontWeight: rowIndex == 0 ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            ),
+                            child: _textoCeldaEditor(context, cells, rowIndex, colIndex),
                           ),
                           if (isOccluded)
-                            const Icon(
+                            Icon(
                               Icons.visibility_off,
                               size: 14,
-                              color: Colors.orange,
+                              color: Colors.orange.shade700,
                             ),
                         ],
                       ),
@@ -1216,88 +1303,26 @@ class _OccludedTableWidget extends StatelessWidget {
             ),
           ),
         ),
-        // Botón de editar tabla
-        if (!readOnly && onEdit != null)
-          Positioned(
-            top: 8,
-            right: 8,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onEdit,
-                borderRadius: BorderRadius.circular(4),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.teal,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.edit, size: 16, color: Colors.white),
-                      SizedBox(width: 4),
-                      Text(
-                        'Editar',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        // Botón de editar oclusiones
-        if (!readOnly && onEditOcclusions != null)
-          Positioned(
-            top: 8,
-            right: onEdit != null ? 80 : 8,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onEditOcclusions,
-                borderRadius: BorderRadius.circular(4),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        occlusions.isEmpty ? 'Oclusiones' : '${occlusions.length} ocl.',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.visibility_off, size: 16, color: Colors.white),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
       ],
     );
   }
 }
 
-/// Widget para mostrar imagen con oclusiones (solo vista previa en editor)
+/// Texto "1 oclusión" / "N oclusiones" bien concordado.
+String textoOclusiones(int n) => n == 1 ? '1 oclusión' : '$n oclusiones';
+
+/// Widget para mostrar imagen con oclusiones (vista previa en el editor).
+///
+/// Dibuja las oclusiones como rectángulos semitransparentes (para ver qué se
+/// tapará en estudio) y no estira imágenes pequeñas: como máximo se muestran
+/// al doble de su tamaño natural y nunca más anchas que la columna.
 class _OccludedImageWidget extends StatelessWidget {
   final String imagePath;
   final double aspectRatio;
   final List<Rect> occlusions;
   final List<Map<String, dynamic>> annotations;
   final List<Map<String, dynamic>> drawings;
+  final Size? tamanoNatural;
   final VoidCallback? onEditOcclusions;
   final VoidCallback? onEditAnnotations;
   final VoidCallback? onViewFullscreen;
@@ -1308,6 +1333,7 @@ class _OccludedImageWidget extends StatelessWidget {
     required this.occlusions,
     this.annotations = const [],
     this.drawings = const [],
+    this.tamanoNatural,
     this.onEditOcclusions,
     this.onEditAnnotations,
     this.onViewFullscreen,
@@ -1315,115 +1341,166 @@ class _OccludedImageWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = ImageConstants.occlusionImageWidth;
-    final height = ImageConstants.calculateHeight(aspectRatio);
+    final cs = Theme.of(context).colorScheme;
+    final anchoColumna = AnchoContenidoEstudio.of(context);
+    final columna = anchoColumna != null
+        ? math.max(200.0, anchoColumna - 8)
+        : ImageConstants.occlusionImageWidth;
+    final altoMax = MediaQuery.of(context).size.height *
+        EstudioLayout.altoMaximoImagenFraccion;
+    final ratio = aspectRatio > 0 ? aspectRatio : 1.0;
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(ImageConstants.imageCenterPadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: width,
-                height: height,
-                child: Stack(
-                  children: [
-                    Image.file(
-                      File(imagePath),
-                      width: width,
-                      height: height,
-                      fit: BoxFit.fill,
-                    ),
-                    if (occlusions.isNotEmpty)
-                      Positioned.fill(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.orange, width: 2),
-                            borderRadius: BorderRadius.circular(8),
+    return ConTamanoNatural(
+      ruta: imagePath,
+      conocido: tamanoNatural,
+      builder: (context, natural) {
+        final width = TamanoImagen.anchoMostrado(
+          anchoColumna: columna,
+          aspectRatio: ratio,
+          altoMaximo: altoMax,
+          natural: natural,
+        );
+        final height = width / ratio;
+
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    width: width,
+                    height: height,
+                    child: Stack(
+                      children: [
+                        Image.file(
+                          File(imagePath),
+                          width: width,
+                          height: height,
+                          fit: BoxFit.fill,
+                          filterQuality: FilterQuality.medium,
+                          errorBuilder: (context, error, stackTrace) => Container(
+                            color: cs.surfaceContainerHighest,
+                            alignment: Alignment.center,
+                            child: Text(
+                              'Imagen no disponible',
+                              style: TextStyle(color: cs.onSurfaceVariant),
+                            ),
                           ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Align(
-                              alignment: Alignment.topRight,
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  onTap: onEditOcclusions,
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(Icons.visibility_off, size: 16, color: Colors.white),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          '${occlusions.length} oclusiones',
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        if (onEditOcclusions != null) ...[
-                                          const SizedBox(width: 4),
-                                          const Icon(Icons.edit, size: 14, color: Colors.white),
-                                        ],
-                                      ],
-                                    ),
+                        ),
+                        // Oclusiones dibujadas (coordenadas normalizadas 0-1)
+                        for (final r in occlusions)
+                          Positioned(
+                            left: r.left * width,
+                            top: r.top * height,
+                            width: math.max(2.0, r.width * width),
+                            height: math.max(2.0, r.height * height),
+                            child: IgnorePointer(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.55),
+                                  border: Border.all(
+                                    color: Colors.orange.shade800,
+                                    width: 1.5,
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
+                        if (occlusions.isNotEmpty)
+                          Positioned(
+                            top: 6,
+                            right: 6,
+                            child: Material(
+                              color: Colors.orange.shade800,
+                              borderRadius: BorderRadius.circular(4),
+                              child: InkWell(
+                                onTap: onEditOcclusions,
+                                borderRadius: BorderRadius.circular(4),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.visibility_off, size: 16, color: Colors.white),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        textoOclusiones(occlusions.length),
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      if (onEditOcclusions != null) ...[
+                                        const SizedBox(width: 4),
+                                        const Icon(Icons.edit, size: 14, color: Colors.white),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Botones de acción (colores del tema: legibles en claro y oscuro)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (onEditOcclusions != null)
+                      FilledButton.tonalIcon(
+                        icon: const Icon(Icons.edit_note, size: 18),
+                        label: Text(occlusions.isEmpty ? 'Añadir oclusiones' : 'Editar oclusiones'),
+                        onPressed: onEditOcclusions,
+                      ),
+                    if (onEditAnnotations != null)
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.draw, size: 18),
+                        label: const Text('Añadir anotaciones'),
+                        onPressed: onEditAnnotations,
+                      ),
+                    if (onViewFullscreen != null)
+                      IconButton(
+                        icon: const Icon(Icons.fullscreen),
+                        tooltip: 'Ver ampliado',
+                        onPressed: onViewFullscreen,
                       ),
                   ],
                 ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            // Botones de acción
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: [
-                if (onEditOcclusions != null)
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.edit_note, size: 18),
-                    label: const Text('Editar oclusiones'),
-                    onPressed: onEditOcclusions,
-                  ),
-                if (onEditAnnotations != null)
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.draw, size: 18),
-                    label: const Text('Añadir anotaciones'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.secondary,
-                    ),
-                    onPressed: onEditAnnotations,
-                  ),
-                if (onViewFullscreen != null)
-                  IconButton(
-                    icon: const Icon(Icons.fullscreen),
-                    tooltip: 'Ver ampliado',
-                    onPressed: onViewFullscreen,
-                  ),
               ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
+}
+
+/// Estilo con el que el editor pinta una oclusión de texto (atributo
+/// `oclusion: true` o fondo antiguo #FFEB3B). Usa el color de texto del
+/// tema, así que se lee bien en claro y en oscuro.
+TextStyle estiloOclusionEditor(BuildContext context, quill.Attribute attr) {
+  final esOclusion = (attr.key == OclusionTexto.clave && attr.value == true) ||
+      (attr.key == 'background' && OclusionTexto.esFondoLegado(attr.value));
+  if (!esOclusion) return const TextStyle();
+  final cs = Theme.of(context).colorScheme;
+  return TextStyle(
+    backgroundColor: Colors.orange.withValues(alpha: 0.28),
+    color: cs.onSurface,
+    decoration: TextDecoration.underline,
+    decorationColor: Colors.orange.shade700,
+    decorationStyle: TextDecorationStyle.dashed,
+    decorationThickness: 2,
+  );
 }
 
 /// Editor de documentos rico usando flutter_quill
@@ -1433,6 +1510,23 @@ class RichDocumentEditor extends StatefulWidget {
   final ValueChanged<String> onContentChanged;
   final bool readOnly;
   final String? title; // Título del documento (para exportar PDF)
+  /// Modo enfoque: columna de lectura más estrecha y barra de herramientas
+  /// plegada por defecto (se puede desplegar).
+  final bool enfoque;
+  /// Foco del área de texto (Quill). Si se pasa, el contenedor puede
+  /// devolver el foco al editor (p. ej. tras alternar el modo enfoque).
+  final FocusNode? focusNode;
+
+  /// Cabecera (título y etiquetas) que se pinta en la parte superior de la
+  /// hoja, alineada con la columna de texto.
+  final Widget? cabecera;
+
+  /// Indicador de guardado para la barra de estado.
+  final Widget? estadoGuardado;
+
+  /// Acciones extra en la barra de estado (modo enfoque: guardar, tamaño de
+  /// texto, salir del modo enfoque).
+  final List<Widget> accionesEstado;
 
   const RichDocumentEditor({
     super.key,
@@ -1440,6 +1534,11 @@ class RichDocumentEditor extends StatefulWidget {
     required this.onContentChanged,
     this.readOnly = false,
     this.title,
+    this.enfoque = false,
+    this.focusNode,
+    this.cabecera,
+    this.estadoGuardado,
+    this.accionesEstado = const [],
   });
 
   @override
@@ -1460,10 +1559,83 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
   // Focus node para atajos de teclado
   final _focusNode = FocusNode();
 
+  // Foco propio del QuillEditor (antes se creaba uno nuevo en cada build y
+  // el editor podía perder el foco al reconstruirse).
+  final _focoQuillInterno = FocusNode();
+  FocusNode get _focoQuill => widget.focusNode ?? _focoQuillInterno;
+
+  // Último contenido notificado: solo se avisa al padre si cambia de verdad
+  // (el controller también notifica al mover el cursor).
+  String? _ultimoContenidoNotificado;
+
+  // Estado de la barra antes de entrar en modo enfoque (para restaurarlo)
+  bool _toolbarPlegadaAntesDeEnfoque = false;
+
+  /// Panel Esquema: `null` = automático (visible si hay sitio y ≥ 2 títulos,
+  /// nunca en modo enfoque); `true`/`false` = elegido por el usuario.
+  bool? _esquemaElegido;
+
+  /// Títulos y recuentos del documento (se recalculan con debounce).
+  List<TituloEsquema> _titulos = const [];
+  EstadisticasDocumento _estadisticas =
+      const EstadisticasDocumento(palabras: 0, oclusiones: 0);
+  Timer? _temporizadorAnalisis;
+  StreamSubscription<quill.DocChange>? _suscripcionCambios;
+
+  /// Estilo de párrafo donde está el cursor (barra de estado).
+  String _estiloActual = 'Normal';
+
+  /// Clave del editor para calcular la posición de un título (esquema).
+  final _claveEditor = GlobalKey<quill.EditorState>();
+
   @override
   void initState() {
     super.initState();
     _initializeController();
+    EstudioPreferencias.cargar();
+    if (widget.enfoque) _isToolbarCollapsed = true;
+    _analizarDocumento();
+    _escucharDocumento();
+    _controller.addListener(_alMoverCursor);
+  }
+
+  /// Se suscribe a los cambios del documento actual (el pegado de Markdown
+  /// antiguo podía sustituir el documento entero).
+  void _escucharDocumento() {
+    _suscripcionCambios?.cancel();
+    _suscripcionCambios = _controller.document.changes.listen((_) {
+      _temporizadorAnalisis?.cancel();
+      _temporizadorAnalisis = Timer(const Duration(milliseconds: 300), () {
+        if (mounted) setState(_analizarDocumento);
+      });
+    });
+  }
+
+  void _analizarDocumento() {
+    _titulos = extraerTitulos(_controller.document);
+    _estadisticas = EstadisticasDocumento.de(_controller.document);
+    _estiloActual = nombreEstiloActual(_controller);
+  }
+
+  void _alMoverCursor() {
+    final estilo = nombreEstiloActual(_controller);
+    if (estilo != _estiloActual && mounted) setState(() => _estiloActual = estilo);
+  }
+
+  @override
+  void didUpdateWidget(covariant RichDocumentEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.enfoque != oldWidget.enfoque) {
+      // El esquema vuelve a su modo automático (oculto en enfoque salvo
+      // que el usuario lo abra)
+      _esquemaElegido = null;
+      if (widget.enfoque) {
+        _toolbarPlegadaAntesDeEnfoque = _isToolbarCollapsed;
+        _isToolbarCollapsed = true;
+      } else {
+        _isToolbarCollapsed = _toolbarPlegadaAntesDeEnfoque;
+      }
+    }
   }
 
   void _initializeController() {
@@ -1475,17 +1647,21 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         _controller = quill.QuillController(
           document: doc,
           selection: const TextSelection.collapsed(offset: 0),
+          config: _configControlador(),
         );
       } catch (e) {
         // Si falla el parsing, crear documento vacío
-        _controller = quill.QuillController.basic();
+        _controller = quill.QuillController.basic(config: _configControlador());
       }
     } else {
-      _controller = quill.QuillController.basic();
+      _controller = quill.QuillController.basic(config: _configControlador());
     }
 
     // Escuchar cambios solo si no es readOnly
     if (!widget.readOnly) {
+      try {
+        _ultimoContenidoNotificado = jsonEncode(_controller.document.toDelta().toJson());
+      } catch (_) {}
       _controller.addListener(_onContentChange);
     }
   }
@@ -1496,12 +1672,91 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     try {
       final delta = _controller.document.toDelta();
       final json = jsonEncode(delta.toJson());
+      if (json == _ultimoContenidoNotificado) return;
+      _ultimoContenidoNotificado = json;
       widget.onContentChanged(json);
     } catch (e) {
       // Ignorar errores durante cambios de contenido
     }
   }
 
+  /// Configuración del controlador: el pegado con Ctrl+V pasa primero por
+  /// [_alPegar] (HTML con formato e imágenes); si no lo gestiona, sigue el
+  /// pegado normal de flutter_quill.
+  /// (API marcada como experimental en flutter_quill 11; la versión está
+  /// acotada a <12 en pubspec.yaml.)
+  quill.QuillControllerConfig _configControlador() => quill.QuillControllerConfig(
+        // ignore: experimental_member_use
+        clipboardConfig: quill.QuillClipboardConfig(
+          // ignore: experimental_member_use
+          onClipboardPaste: _alPegar,
+        ),
+      );
+
+  /// Ctrl+V. Devuelve `true` si el pegado se ha gestionado aquí.
+  Future<bool> _alPegar() async {
+    if (widget.readOnly || !mounted) return false;
+    try {
+      final contenido = await ClipboardHandler.analyzeClipboard();
+      if (contenido.isImage) {
+        await _insertImageFromBytes(contenido.data as Uint8List);
+        return true;
+      }
+      if (contenido.isHtml) return _pegarHtml(contenido);
+    } catch (e) {
+      debugPrint('Error al pegar: $e');
+    }
+    return false;
+  }
+
+  /// Pega HTML con formato (navegador, ChatGPT/Claude, Google Docs...).
+  /// Si la conversión falla o queda vacía, cae al texto plano: Markdown si
+  /// lo parece; si no, devuelve `false` (pegado normal de Quill).
+  bool _pegarHtml(ClipboardContent contenido) {
+    try {
+      final ops = json.decode(HtmlToQuill.convert(contenido.data as String)) as List;
+      final soloSalto = ops.length == 1 && ops.first is Map && (ops.first as Map)['insert'] == '\n';
+      if (ops.isNotEmpty && !soloSalto) {
+        _insertarDelta(ops);
+        return true;
+      }
+    } catch (e) {
+      debugPrint('No se pudo convertir el HTML pegado: $e');
+    }
+    final plano = contenido.textoPlano;
+    if (plano != null && plano.trim().isNotEmpty && MarkdownToQuill.looksLikeMarkdown(plano)) {
+      _insertarDelta(json.decode(MarkdownToQuill.convert(plano)) as List);
+      return true;
+    }
+    return false;
+  }
+
+  /// Inserta un Delta (lista de operaciones JSON) en la posición del cursor,
+  /// sustituyendo la selección, y deja el cursor al final de lo insertado.
+  /// Se aplica como un cambio normal (se puede deshacer con Ctrl+Z).
+  void _insertarDelta(List ops) {
+    final insertado = Delta.fromJson(ops);
+    if (insertado.isEmpty) return;
+    final sel = _controller.selection;
+    final finalDoc = math.max(0, _controller.document.length - 1);
+    final indice = sel.isValid ? sel.start.clamp(0, finalDoc) : finalDoc;
+    final longitud = sel.isValid ? (sel.end.clamp(0, finalDoc) - indice) : 0;
+    final cambio = Delta()..retain(indice);
+    if (longitud > 0) cambio.delete(longitud);
+    _controller.compose(
+      cambio.concat(insertado),
+      TextSelection.collapsed(offset: indice + insertado.length),
+      quill.ChangeSource.local,
+    );
+    _controller.updateSelection(
+      TextSelection.collapsed(
+        offset: math.min(indice + insertado.length, math.max(0, _controller.document.length - 1)),
+      ),
+      quill.ChangeSource.local,
+    );
+  }
+
+  /// Pega el texto del portapapeles interpretándolo como Markdown.
   Future<void> _handlePasteAsMarkdown() async {
     if (!mounted) return;
 
@@ -1510,10 +1765,7 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       if (clipboardData == null || clipboardData.text == null || clipboardData.text!.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('El portapapeles está vacío'),
-              backgroundColor: Colors.orange,
-            ),
+            const SnackBar(content: Text('El portapapeles está vacío')),
           );
         }
         return;
@@ -1521,127 +1773,19 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
 
       final pastedText = clipboardData.text!;
 
-      // Verificar si parece Markdown
+      // Si no parece Markdown, pegar como texto plano
       if (!MarkdownToQuill.looksLikeMarkdown(pastedText)) {
-        // Pegar como texto plano
         final selection = _controller.selection;
-        final index = selection.start;
-        final length = selection.end - selection.start;
-        _controller.replaceText(index, length, pastedText, null);
+        _controller.replaceText(selection.start, selection.end - selection.start, pastedText, null);
         return;
       }
 
-      // Convertir Markdown a Delta JSON
-      final deltaJson = MarkdownToQuill.convert(pastedText);
-      final deltaList = json.decode(deltaJson) as List;
-
-      // Obtener posición actual
-      final selection = _controller.selection;
-      final index = selection.start;
-      final length = selection.end - selection.start;
-
-      // Obtener el documento actual como Delta JSON
-      final currentDelta = _controller.document.toDelta();
-      final currentJson = currentDelta.toJson();
-
-      // Construir el nuevo documento:
-      // 1. Contenido antes de la posición
-      // 2. Contenido nuevo (Markdown convertido)
-      // 3. Contenido después de la posición
-      final newDocumentOps = <Map<String, dynamic>>[];
-
-      // Agregar contenido antes del índice
-      int charCount = 0;
-      for (final op in currentJson) {
-        final insert = op['insert'];
-        final opLength = insert is String ? insert.length : 1;
-
-        if (charCount >= index) {
-          // Ya llegamos a la posición de inserción
-          break;
-        } else if (charCount + opLength <= index) {
-          // Esta operación está completamente antes del índice
-          newDocumentOps.add(op);
-          charCount += opLength;
-        } else {
-          // Esta operación se divide en la posición del índice
-          if (insert is String) {
-            final splitIndex = index - charCount;
-            final beforeText = insert.substring(0, splitIndex);
-            newDocumentOps.add({
-              'insert': beforeText,
-              if (op['attributes'] != null) 'attributes': op['attributes'],
-            });
-            charCount = index;
-          }
-          break;
-        }
-      }
-
-      // Agregar el contenido nuevo del Markdown
-      newDocumentOps.addAll(deltaList.cast<Map<String, dynamic>>());
-
-      // Agregar contenido después de la selección
-      charCount = 0;
-      bool skipToAfterSelection = true;
-      for (final op in currentJson) {
-        final insert = op['insert'];
-        final opLength = insert is String ? insert.length : 1;
-
-        if (skipToAfterSelection) {
-          if (charCount >= index + length) {
-            skipToAfterSelection = false;
-          } else if (charCount + opLength > index + length) {
-            // Esta operación se divide después de la selección
-            if (insert is String) {
-              final skipChars = (index + length) - charCount;
-              final afterText = insert.substring(skipChars);
-              if (afterText.isNotEmpty) {
-                newDocumentOps.add({
-                  'insert': afterText,
-                  if (op['attributes'] != null) 'attributes': op['attributes'],
-                });
-              }
-            }
-            skipToAfterSelection = false;
-          }
-          charCount += opLength;
-          continue;
-        }
-
-        // Agregar el resto del contenido
-        newDocumentOps.add(op);
-        charCount += opLength;
-      }
-
-      // Crear el nuevo documento desde el JSON combinado
-      final newDocument = quill.Document.fromJson(newDocumentOps);
-
-      // Reemplazar todo el documento
-      _controller.document = newDocument;
-
-      // Calcular la nueva posición del cursor
-      int insertedLength = 0;
-      for (final op in deltaList) {
-        final insert = op['insert'];
-        if (insert is String) {
-          insertedLength += insert.length;
-        } else if (insert is Map) {
-          insertedLength += 1;
-        }
-      }
-
-      // Mover cursor al final del contenido insertado
-      _controller.updateSelection(
-        TextSelection.collapsed(offset: index + insertedLength),
-        quill.ChangeSource.local,
-      );
+      _insertarDelta(json.decode(MarkdownToQuill.convert(pastedText)) as List);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Markdown convertido automáticamente'),
-            backgroundColor: Colors.green,
             duration: Duration(seconds: 2),
           ),
         );
@@ -1649,10 +1793,7 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al convertir Markdown: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error al convertir Markdown: $e')),
         );
       }
     }
@@ -1663,9 +1804,13 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     if (!widget.readOnly) {
       _controller.removeListener(_onContentChange);
     }
+    _temporizadorAnalisis?.cancel();
+    _suscripcionCambios?.cancel();
+    _controller.removeListener(_alMoverCursor);
     _controller.dispose();
     _scrollController.dispose();
     _focusNode.dispose();
+    _focoQuillInterno.dispose();
     super.dispose();
   }
 
@@ -1735,10 +1880,12 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     final selection = _controller.selection;
     if (!selection.isValid || selection.isCollapsed) return;
 
+    final actual = _controller.getSelectionStyle().attributes['script']?.value;
     _controller.formatText(
       selection.start,
       selection.end - selection.start,
-      quill.Attribute('script', quill.AttributeScope.inline, 'super'),
+      // Alterna: si ya es superíndice, lo quita
+      quill.Attribute('script', quill.AttributeScope.inline, actual == 'super' ? null : 'super'),
     );
   }
 
@@ -1747,10 +1894,12 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     final selection = _controller.selection;
     if (!selection.isValid || selection.isCollapsed) return;
 
+    final actual = _controller.getSelectionStyle().attributes['script']?.value;
     _controller.formatText(
       selection.start,
       selection.end - selection.start,
-      quill.Attribute('script', quill.AttributeScope.inline, 'sub'),
+      // Alterna: si ya es subíndice, lo quita
+      quill.Attribute('script', quill.AttributeScope.inline, actual == 'sub' ? null : 'sub'),
     );
   }
 
@@ -1764,6 +1913,19 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       if (clipboardContent.isImage) {
         final imageBytes = clipboardContent.data as Uint8List;
         await _insertImageFromBytes(imageBytes);
+        return;
+      }
+
+      // HTML con formato: convertirlo; si no se puede, texto plano / Markdown
+      if (clipboardContent.isHtml) {
+        if (!_pegarHtml(clipboardContent)) {
+          final plano = clipboardContent.textoPlano;
+          if (plano != null && plano.isNotEmpty) {
+            final sel = _controller.selection;
+            _controller.replaceText(sel.start, sel.end - sel.start, plano,
+                TextSelection.collapsed(offset: sel.start + plano.length));
+          }
+        }
         return;
       }
 
@@ -1839,11 +2001,12 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         final codec = await ui.instantiateImageCodec(imageBytes);
         final frame = await codec.getNextFrame();
         final aspectRatio = frame.image.width / frame.image.height;
+        final tamanoNatural = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
         frame.image.dispose();
         codec.dispose();
 
         // Insertar la imagen
-        _insertImageWithOcclusions(localPath, [], aspectRatio);
+        _insertImageWithOcclusions(localPath, [], aspectRatio, natural: tamanoNatural);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1888,11 +2051,12 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         final codec = await ui.instantiateImageCodec(imageBytes);
         final frame = await codec.getNextFrame();
         final aspectRatio = frame.image.width / frame.image.height;
+        final tamanoNatural = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
         frame.image.dispose();
         codec.dispose();
 
         // Insertar la imagen
-        _insertImageWithOcclusions(localPath, [], aspectRatio);
+        _insertImageWithOcclusions(localPath, [], aspectRatio, natural: tamanoNatural);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1952,11 +2116,12 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         final codec = await ui.instantiateImageCodec(imageBytes);
         final frame = await codec.getNextFrame();
         final aspectRatio = frame.image.width / frame.image.height;
+        final tamanoNatural = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
         frame.image.dispose();
         codec.dispose();
 
         // Insertar la imagen
-        _insertImageWithOcclusions(localPath, [], aspectRatio);
+        _insertImageWithOcclusions(localPath, [], aspectRatio, natural: tamanoNatural);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1995,6 +2160,7 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
             final codec = await ui.instantiateImageCodec(imageBytes);
             final frame = await codec.getNextFrame();
             final aspectRatio = frame.image.width / frame.image.height;
+            final tamanoNatural = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
             frame.image.dispose();
             codec.dispose();
 
@@ -2020,9 +2186,9 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
 
               if (shouldAddOcclusions == true && mounted) {
                 final occlusions = await _showOcclusionEditor(localPath, aspectRatio);
-                _insertImageWithOcclusions(localPath, occlusions ?? [], aspectRatio);
+                _insertImageWithOcclusions(localPath, occlusions ?? [], aspectRatio, natural: tamanoNatural);
               } else {
-                _insertImageWithOcclusions(localPath, [], aspectRatio);
+                _insertImageWithOcclusions(localPath, [], aspectRatio, natural: tamanoNatural);
               }
             }
           }
@@ -2040,29 +2206,35 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     }
   }
 
-  Widget _buildOcclusionButton() {
-    return Tooltip(
-      message: 'Marcar como oclusión (ocultar en modo estudio)',
-      child: IconButton(
-        icon: const Icon(Icons.visibility_off),
-        onPressed: _handleOcclusionMark,
-        color: Colors.orange,
-      ),
-    );
-  }
-
+  /// Marca/desmarca la selección como oclusión de texto.
+  ///
+  /// Formato en el Delta: atributo inline `{"oclusion": true}` (ver
+  /// [OclusionTexto]). Al desmarcar se quita también el fondo #FFEB3B del
+  /// formato antiguo, si lo tenía.
   void _handleOcclusionMark() {
     if (!mounted) return;
 
     final selection = _controller.selection;
     if (!selection.isCollapsed) {
-      // Marcar el texto seleccionado con fondo amarillo (oclusión)
-      _controller.formatSelection(
-        quill.Attribute.fromKeyValue(
-          'background',
-          '#FFEB3B', // Amarillo para indicar oclusión
-        ),
-      );
+      final estilo = _controller.getSelectionStyle().attributes;
+      final yaOculta = estilo[OclusionTexto.clave]?.value == true ||
+          OclusionTexto.esFondoLegado(estilo['background']?.value);
+      if (yaOculta) {
+        _controller.formatSelection(
+          const quill.Attribute(OclusionTexto.clave, quill.AttributeScope.inline, null),
+        );
+        if (OclusionTexto.esFondoLegado(estilo['background']?.value)) {
+          _controller.formatSelection(const quill.BackgroundAttribute(null));
+        }
+      } else {
+        _controller.formatSelection(
+          const quill.Attribute(
+            OclusionTexto.clave,
+            quill.AttributeScope.inline,
+            OclusionTexto.valor,
+          ),
+        );
+      }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2073,66 +2245,6 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         );
       }
     }
-  }
-
-  Widget _buildImageButton() {
-    return Tooltip(
-      message: 'Insertar imagen',
-      child: IconButton(
-        icon: const Icon(Icons.image),
-        onPressed: _handleImageInsert,
-        color: Colors.blue,
-      ),
-    );
-  }
-
-  Widget _buildLatexButton() {
-    return Tooltip(
-      message: 'Insertar ecuación LaTeX',
-      child: IconButton(
-        icon: const Icon(Icons.functions),
-        onPressed: _handleLatexInsert,
-        color: Colors.purple,
-      ),
-    );
-  }
-
-  Widget _buildTableButton() {
-    return Tooltip(
-      message: 'Insertar tabla',
-      child: IconButton(
-        icon: const Icon(Icons.table_chart),
-        onPressed: _handleTableInsert,
-        color: Colors.teal,
-      ),
-    );
-  }
-
-  Widget _buildMarkdownButton() {
-    return Tooltip(
-      message: 'Pegar texto como Markdown (convierte ## títulos, **negrita**, etc.)',
-      child: IconButton(
-        icon: const Icon(Icons.text_snippet),
-        onPressed: _handlePasteAsMarkdown,
-        color: Colors.purple,
-      ),
-    );
-  }
-
-  Widget _buildEditOcclusionsButton() {
-    // Verificar si el cursor está sobre una imagen con oclusiones
-    final hasImageOccluded = _isImageOccludedAtCursor();
-
-    if (!hasImageOccluded) return const SizedBox.shrink();
-
-    return Tooltip(
-      message: 'Editar oclusiones de la imagen',
-      child: IconButton(
-        icon: const Icon(Icons.edit_note),
-        onPressed: _handleEditImageOcclusions,
-        color: Colors.green,
-      ),
-    );
   }
 
   bool _isImageOccludedAtCursor() {
@@ -2214,12 +2326,7 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
 
       final currentOcclusions = occlusionsData?.map((o) {
         final oMap = o as Map<String, dynamic>;
-        return Rect.fromLTRB(
-          (oMap['left'] as num).toDouble(),
-          (oMap['top'] as num).toDouble(),
-          (oMap['right'] as num).toDouble(),
-          (oMap['bottom'] as num).toDouble(),
-        );
+        return rectOclusionNormalizado(oMap);
       }).toList() ?? [];
 
       if (!mounted) return;
@@ -2235,7 +2342,8 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       if (newOcclusions == null || !mounted) return;
 
       // Actualizar el documento con las nuevas oclusiones
-      final newImageData = {
+      final newImageData = <String, dynamic>{
+        ...imageData, // conserva anotaciones, dibujos y tamaño natural
         'path': imagePath,
         'aspectRatio': aspectRatio,
         'occlusions': newOcclusions.map((r) => {
@@ -2251,7 +2359,7 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         targetPos,
         1, // Longitud del embed
         quill.BlockEmbed('image_occluded', jsonEncode(newImageData)),
-        null,
+        TextSelection.collapsed(offset: targetPos + 1),
       );
 
       if (mounted) {
@@ -2293,31 +2401,16 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
   }
 
   void _insertLatexWithOcclusions(String latexCode, List<LatexOcclusion> occlusions) {
-    final selection = _controller.selection;
-    final index = selection.start;
-    final length = selection.end - selection.start;
-
     if (occlusions.isEmpty) {
       // Insertar LaTeX sin oclusiones
-      _controller.replaceText(
-        index,
-        length,
-        quill.BlockEmbed('latex', latexCode),
-        null,
-      );
+      _insertarEmbedEnCursor(quill.BlockEmbed('latex', latexCode));
     } else {
       // Insertar LaTeX con oclusiones
       final latexData = {
         'code': latexCode,
         'occlusions': occlusions.map((o) => o.toJson()).toList(),
       };
-
-      _controller.replaceText(
-        index,
-        length,
-        quill.BlockEmbed('latex_occluded', jsonEncode(latexData)),
-        null,
-      );
+      _insertarEmbedEnCursor(quill.BlockEmbed('latex_occluded', jsonEncode(latexData)));
     }
   }
 
@@ -2341,34 +2434,19 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
   }
 
   void _insertTable(int rows, int columns, List<List<String>> cells) {
-    final selection = _controller.selection;
-    final index = selection.start;
-    final length = selection.end - selection.start;
-
     final tableData = {
       'rows': rows,
       'columns': columns,
       'cells': cells,
     };
-
-    _controller.replaceText(
-      index,
-      length,
-      quill.BlockEmbed('table', jsonEncode(tableData)),
-      null,
-    );
+    _insertarEmbedEnCursor(quill.BlockEmbed('table', jsonEncode(tableData)));
   }
 
   Future<void> _handleImageInsert() async {
     if (!mounted) return;
 
     try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1920,
-        imageQuality: 85,
-      );
+      final XFile? image = await _elegirImagen();
 
       if (image == null) return;
 
@@ -2389,6 +2467,7 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       final codec = await ui.instantiateImageCodec(imageBytes);
       final frame = await codec.getNextFrame();
       final aspectRatio = frame.image.width / frame.image.height;
+      final tamanoNatural = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
       frame.image.dispose();
       codec.dispose();
 
@@ -2418,10 +2497,10 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         final occlusions = await _showOcclusionEditor(localPath, aspectRatio);
 
         // Insertar imagen con oclusiones y aspect ratio
-        _insertImageWithOcclusions(localPath, occlusions ?? [], aspectRatio);
+        _insertImageWithOcclusions(localPath, occlusions ?? [], aspectRatio, natural: tamanoNatural);
       } else {
         // Insertar imagen sin oclusiones pero con aspect ratio
-        _insertImageWithOcclusions(localPath, [], aspectRatio);
+        _insertImageWithOcclusions(localPath, [], aspectRatio, natural: tamanoNatural);
       }
 
       if (mounted) {
@@ -2444,6 +2523,61 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     }
   }
 
+  /// Clave en SharedPreferences (en disco: `flutter.ULTIMA_CARPETA_IMAGENES`).
+  static const _claveUltimaCarpeta = 'ULTIMA_CARPETA_IMAGENES';
+
+  /// Carpeta inicial del selector: la última usada o, si no hay, la carpeta
+  /// de capturas del anotador (`~/Documentos/APUNTES pc/screen-annotator/capturas`).
+  Future<String?> _carpetaInicialImagenes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ultima = prefs.getString(_claveUltimaCarpeta);
+      if (ultima != null && await Directory(ultima).exists()) return ultima;
+    } catch (_) {}
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    if (home != null) {
+      final capturas = path.join(home, 'Documentos', 'APUNTES pc', 'screen-annotator', 'capturas');
+      if (await Directory(capturas).exists()) return capturas;
+      final documentos = path.join(home, 'Documentos');
+      if (await Directory(documentos).exists()) return documentos;
+    }
+    return null;
+  }
+
+  /// Abre el selector de imágenes. En escritorio usa el diálogo nativo de
+  /// file_selector (botón "Abrir", carpeta inicial recordada); en móvil, la
+  /// galería de image_picker.
+  Future<XFile?> _elegirImagen() async {
+    final esEscritorio = Platform.isLinux || Platform.isWindows || Platform.isMacOS;
+    if (!esEscritorio) {
+      return _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+    }
+    final inicial = await _carpetaInicialImagenes();
+    final archivo = await FileSelectorPlatform.instance.openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Imágenes',
+          extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'],
+          mimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'],
+        ),
+      ],
+      initialDirectory: inicial,
+      confirmButtonText: 'Abrir',
+    );
+    if (archivo != null) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_claveUltimaCarpeta, path.dirname(archivo.path));
+      } catch (_) {}
+    }
+    return archivo;
+  }
+
   Future<List<Rect>?> _showOcclusionEditor(String imagePath, double aspectRatio) async {
     return await ImageOcclusionEditor.open(
       context,
@@ -2452,15 +2586,19 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     );
   }
 
-  void _insertImageWithOcclusions(String imagePath, List<Rect> occlusions, double aspectRatio) {
-    final selection = _controller.selection;
-    final index = selection.start;
-    final length = selection.end - selection.start;
-
+  void _insertImageWithOcclusions(
+    String imagePath,
+    List<Rect> occlusions,
+    double aspectRatio, {
+    Size? natural,
+  }) {
     // Crear datos de imagen con oclusiones y aspect ratio
-    final imageData = {
+    final imageData = <String, dynamic>{
       'path': imagePath,
       'aspectRatio': aspectRatio,
+      // Tamaño natural en píxeles: evita estirar imágenes pequeñas
+      if (natural != null) 'width': natural.width.round(),
+      if (natural != null) 'height': natural.height.round(),
       'occlusions': occlusions.map((r) => {
         'left': r.left,
         'top': r.top,
@@ -2470,222 +2608,352 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     };
 
     // Siempre usar formato personalizado con aspectRatio (incluso sin oclusiones)
+    _insertarEmbedEnCursor(quill.BlockEmbed('image_occluded', jsonEncode(imageData)));
+  }
+
+  /// Inserta un embed de bloque en la posición del cursor (sustituyendo la
+  /// selección) y deja el cursor DESPUÉS del embed. Antes el cursor se
+  /// quedaba delante y el siguiente embed aparecía encima del anterior.
+  /// Si no hay cursor válido, inserta al final del documento.
+  void _insertarEmbedEnCursor(quill.BlockEmbed embed) {
+    final selection = _controller.selection;
+    final finalDoc = math.max(0, _controller.document.length - 1);
+    int index;
+    int length;
+    if (selection.isValid && selection.start >= 0 && selection.start <= finalDoc) {
+      index = selection.start;
+      length = math.min(selection.end, finalDoc) - index;
+    } else {
+      index = finalDoc;
+      length = 0;
+    }
     _controller.replaceText(
       index,
       length,
-      quill.BlockEmbed('image_occluded', jsonEncode(imageData)),
-      null,
+      embed,
+      TextSelection.collapsed(offset: index + 1),
     );
   }
 
 
-  @override
-  Widget build(BuildContext context) {
-    Widget editorContent = Column(
-      children: [
-        // Barra de herramientas
-        if (!widget.readOnly) ...[
-          Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              border: Border(
-                bottom: BorderSide(
-                  color: Theme.of(context).dividerColor,
-                ),
-              ),
+  // ===================== ZONA DE TRABAJO =====================
+
+  /// Panel Esquema visible en el último build (para alternarlo).
+  bool _esquemaVisibleActual = false;
+
+  /// ¿Mostrar el esquema? Automático: si hay sitio (≥ 1400 px), al menos
+  /// dos títulos y no estamos en modo enfoque; si el usuario lo abrió o
+  /// cerró, manda su elección.
+  bool _calcularEsquemaVisible(double anchoTotal) {
+    final elegido = _esquemaElegido;
+    if (elegido != null) return elegido;
+    if (widget.enfoque) return false;
+    return anchoTotal >= 1400 && _titulos.length >= 2;
+  }
+
+  void _alternarEsquema() {
+    setState(() => _esquemaElegido = !_esquemaVisibleActual);
+  }
+
+  /// Devuelve el foco al texto (tras usar la barra o un diálogo).
+  void _devolverFoco() {
+    if (mounted) _focoQuill.requestFocus();
+  }
+
+  /// Mueve el cursor al título en [offset] y hace scroll hasta él
+  /// (dejándolo arriba con un pequeño margen).
+  void _irATitulo(int offset) {
+    // Cursor al final del texto del título: así el estilo del párrafo
+    // (barra de estado / selector) es el del título y no el de la línea
+    // anterior.
+    final titulo = _titulos.where((t) => t.offset == offset).firstOrNull;
+    final destinoCursor = math.min(
+      offset + (titulo?.texto.length ?? 0),
+      math.max(0, _controller.document.length - 1),
+    );
+    _controller.updateSelection(
+      TextSelection.collapsed(offset: destinoCursor),
+      quill.ChangeSource.local,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final estado = _claveEditor.currentState;
+      if (estado != null && _scrollController.hasClients) {
+        try {
+          final rect = estado.renderEditor.getLocalRectForCaret(TextPosition(offset: offset));
+          final destino = (rect.top - 24).clamp(0.0, _scrollController.position.maxScrollExtent);
+          await _scrollController.animateTo(
+            destino,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+          );
+        } catch (_) {}
+      }
+      _devolverFoco();
+    });
+  }
+
+  AccionesEditor get _acciones => AccionesEditor(
+        oclusion: _handleOcclusionMark,
+        insertarImagen: _handleImageInsert,
+        insertarTabla: _handleTableInsert,
+        insertarLatex: _handleLatexInsert,
+        insertarEnlace: () => mostrarDialogoEnlace(context, _controller),
+        insertarSeparador: () => insertarSeparador(_controller),
+        pegarMarkdown: _handlePasteAsMarkdown,
+        superindice: _applySuperscript,
+        subindice: _applySubscript,
+        mayusculas: _transformToUppercase,
+        minusculas: _transformToLowercase,
+        capitalizar: _transformToCapitalize,
+        exportarPdf: _exportToPdf,
+        buscar: () => abrirBusqueda(context, _controller),
+        editarOclusionesImagen: _handleEditImageOcclusions,
+      );
+
+  /// Atajos que deben ganar a los de flutter_quill (que usa Ctrl+Shift+L
+  /// para viñetas, Ctrl+Shift+O para numerada y Ctrl+0 para "sin título").
+  static const Map<ShortcutActivator, Intent> _atajosEditor = {
+    EditorShortcuts.header1: _EditorIntent('h1'),
+    EditorShortcuts.header2: _EditorIntent('h2'),
+    EditorShortcuts.header3: _EditorIntent('h3'),
+    EditorShortcuts.bulletList: _EditorIntent('viñetas'),
+    EditorShortcuts.numberedList: _EditorIntent('numerada'),
+    EditorShortcuts.link: _EditorIntent('enlace'),
+    EditorShortcuts.oclusion: _EditorIntent('oclusion'),
+    EditorShortcuts.find: _EditorIntent('buscar'),
+    // Ctrl+0 es "restablecer tamaño de texto" (ver AtajosEstudio)
+    SingleActivator(LogicalKeyboardKey.digit0, control: true): _EditorIntent('escala0'),
+    EditorShortcuts.superscript: _EditorIntent('superscript'),
+    EditorShortcuts.subscript: _EditorIntent('subscript'),
+    EditorShortcuts.capitalize: _EditorIntent('capitalize'),
+    EditorShortcuts.pasteMarkdown: _EditorIntent('pasteMarkdown'),
+  };
+
+  /// Ejecuta la acción de un atajo de teclado del editor.
+  void _ejecutarAtajo(String accion) {
+    // Escribiendo en el título o en las etiquetas (cabecera) los atajos del
+    // documento no deben actuar sobre el texto.
+    final enDocumento = _focoQuill.hasFocus || _focusNode.hasPrimaryFocus;
+    if (!enDocumento && accion != 'escala0') return;
+    switch (accion) {
+      case 'h1':
+        alternarTitulo(_controller, 1);
+      case 'h2':
+        alternarTitulo(_controller, 2);
+      case 'h3':
+        alternarTitulo(_controller, 3);
+      case 'viñetas':
+        alternarAtributo(_controller, quill.Attribute.ul);
+      case 'numerada':
+        alternarAtributo(_controller, quill.Attribute.ol);
+      case 'enlace':
+        mostrarDialogoEnlace(context, _controller).then((_) => _devolverFoco());
+      case 'oclusion':
+        _handleOcclusionMark();
+      case 'buscar':
+        abrirBusqueda(context, _controller).then((_) => _devolverFoco());
+      case 'escala0':
+        EstudioPreferencias.restablecer();
+      case 'superscript':
+        _applySuperscript();
+      case 'subscript':
+        _applySubscript();
+      case 'uppercase':
+        _transformToUppercase();
+      case 'lowercase':
+        _transformToLowercase();
+      case 'capitalize':
+        _transformToCapitalize();
+      case 'pasteMarkdown':
+        _handleSmartPaste();
+    }
+  }
+
+  /// Fondo de la zona que rodea la hoja (un tono por debajo de `surface`).
+  Color _fondoZona(ColorScheme cs) =>
+      Color.alphaBlend(cs.onSurface.withValues(alpha: 0.035), cs.surface);
+
+  /// La hoja: columna centrada de fondo `surface` con borde y sombra
+  /// sutiles; dentro, la cabecera y el editor. El margen lateral va DENTRO
+  /// del área con scroll, así la rueda del ratón funciona también sobre los
+  /// márgenes.
+  Widget _zonaTrabajo(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final esMovil = Platform.isAndroid || Platform.isIOS;
+    return ValueListenableBuilder<AnchoLectura>(
+      valueListenable: EstudioPreferencias.anchoLectura,
+      builder: (context, anchoPref, _) => LayoutBuilder(
+        builder: (context, c) {
+          final margenHoja = esMovil ? 12.0 : 48.0;
+          final minimoLateral = esMovil ? 8.0 : 16.0;
+          final anchoTexto = math.max(
+            0.0,
+            math.min(
+              anchoPref.anchoPara(enfoque: widget.enfoque),
+              c.maxWidth - 2 * minimoLateral,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+          );
+          final lateral = math.max(minimoLateral, (c.maxWidth - anchoTexto) / 2);
+          final anchoHoja = math.min(c.maxWidth, anchoTexto + 2 * margenHoja);
+          final izquierdaHoja = (c.maxWidth - anchoHoja) / 2;
+          final hayMargenFuera = c.maxWidth - anchoHoja > 4;
+
+          return Container(
+            color: _fondoZona(cs),
+            foregroundDecoration: _isDragging
+                ? BoxDecoration(
+                    color: cs.primary.withValues(alpha: 0.06),
+                    border: Border.all(color: cs.primary, width: 2),
+                  )
+                : null,
+            child: Stack(
               children: [
-                // Botón para colapsar/expandir toolbar - MÁS VISIBLE
-                Material(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  child: InkWell(
-                    onTap: () => setState(() => _isToolbarCollapsed = !_isToolbarCollapsed),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            _isToolbarCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
-                            size: 20,
-                            color: Theme.of(context).colorScheme.onPrimaryContainer,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _isToolbarCollapsed ? 'Mostrar herramientas' : 'Ocultar herramientas',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: Theme.of(context).colorScheme.onPrimaryContainer,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(
-                            _isToolbarCollapsed ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
-                            size: 20,
-                            color: Theme.of(context).colorScheme.onPrimaryContainer,
-                          ),
-                        ],
+                // Hoja de fondo (no recibe eventos: el editor ocupa todo)
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  left: izquierdaHoja,
+                  width: anchoHoja,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: cs.surface,
+                        border: hayMargenFuera
+                            ? Border.symmetric(
+                                vertical: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.45)),
+                              )
+                            : null,
+                        boxShadow: hayMargenFuera
+                            ? [
+                                BoxShadow(
+                                  color: cs.shadow.withValues(alpha: 0.05),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ]
+                            : null,
                       ),
                     ),
                   ),
                 ),
-                // Toolbar colapsable con animación
-                AnimatedCrossFade(
-                  firstChild: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: quill.QuillSimpleToolbar(
-                          controller: _controller,
-                          config: quill.QuillSimpleToolbarConfig(
-                            showAlignmentButtons: true,
-                            showBackgroundColorButton: true,
-                            showBoldButton: true,
-                            showCenterAlignment: true,
-                            showClearFormat: true,
-                            showCodeBlock: true,
-                            showColorButton: true,
-                            showDirection: false,
-                            showDividers: true,
-                            // Fuentes habilitadas
-                            showFontFamily: true,
-                            buttonOptions: quill.QuillSimpleToolbarButtonOptions(
-                              fontFamily: quill.QuillToolbarFontFamilyButtonOptions(
-                                items: const {
-                                  'Sans Serif': 'sans-serif',
-                                  'Serif': 'serif',
-                                  'Monospace': 'monospace',
-                                  'Roboto': 'Roboto',
-                                  'Open Sans': 'Open Sans',
-                                  'Lato': 'Lato',
-                                  'Georgia': 'Georgia',
-                                  'Courier': 'Courier New',
-                                },
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (widget.cabecera != null)
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(lateral, 32, lateral, 0),
+                        child: widget.cabecera,
+                      ),
+                    Expanded(
+                      child: EscalaTextoEstudio(
+                        child: Builder(
+                          builder: (context) {
+                            final escala = MediaQuery.textScalerOf(context).scale(16) / 16;
+                            return AnchoContenidoEstudio(
+                              ancho: anchoTexto,
+                              child: quill.QuillEditor.basic(
+                                controller: _controller,
+                                config: quill.QuillEditorConfig(
+                                  scrollable: true,
+                                  autoFocus: false,
+                                  expands: false,
+                                  editorKey: _claveEditor,
+                                  padding: EdgeInsets.fromLTRB(
+                                    lateral,
+                                    widget.cabecera != null ? 16 : 32,
+                                    lateral,
+                                    120,
+                                  ),
+                                  placeholder: widget.readOnly
+                                      ? ''
+                                      : 'Escribe aquí… Arrastra imágenes o pega con Ctrl+V',
+                                  customStyles: estilosDocumentoQuill(Theme.of(context), escala: escala),
+                                  customShortcuts: widget.readOnly ? null : _atajosEditor,
+                                  customActions: widget.readOnly
+                                      ? null
+                                      : {
+                                          _EditorIntent: CallbackAction<_EditorIntent>(
+                                            onInvoke: (intent) {
+                                              _ejecutarAtajo(intent.action);
+                                              return null;
+                                            },
+                                          ),
+                                        },
+                                  embedBuilders: const [
+                                    ImageEmbedBuilder(),
+                                    ImageOccludedEmbedBuilder(),
+                                    LatexEmbedBuilder(),
+                                    LatexOccludedEmbedBuilder(),
+                                    TableEmbedBuilder(),
+                                    TableOccludedEmbedBuilder(),
+                                  ],
+                                  // Oclusiones de texto (formato nuevo y #FFEB3B antiguo)
+                                  customStyleBuilder: (attr) => estiloOclusionEditor(context, attr),
+                                ),
+                                focusNode: _focoQuill,
+                                scrollController: _scrollController,
                               ),
-                              fontSize: quill.QuillToolbarFontSizeButtonOptions(
-                                items: const {
-                                  'Pequeño': '10',
-                                  'Normal': '14',
-                                  'Mediano': '16',
-                                  'Grande': '18',
-                                  'Muy grande': '22',
-                                  'Título': '28',
-                                  'Encabezado': '36',
-                                },
-                              ),
-                            ),
-                            // Tamaños de fuente habilitados
-                            showFontSize: true,
-                            // Interlineado habilitado
-                            showLineHeightButton: true,
-                            showHeaderStyle: true,
-                            showIndent: true,
-                            showInlineCode: true,
-                            showItalicButton: true,
-                            showJustifyAlignment: true,
-                            showLeftAlignment: true,
-                            showLink: true,
-                            showListBullets: true,
-                            showListCheck: true,
-                            showListNumbers: true,
-                            showQuote: true,
-                            showRedo: true,
-                            showRightAlignment: true,
-                            showSearchButton: false,
-                            showSmallButton: false,
-                            showStrikeThrough: true,
-                            showSubscript: true,
-                            showSuperscript: true,
-                            showUnderLineButton: true,
-                            showUndo: true,
-                          ),
+                            );
+                          },
                         ),
                       ),
-                      // Botones personalizados - NUEVOS FORMATOS
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            top: BorderSide(color: Theme.of(context).dividerColor, width: 0.5),
-                          ),
-                        ),
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              _buildSuperscriptButton(),
-                              _buildSubscriptButton(),
-                              const VerticalDivider(),
-                              _buildUppercaseButton(),
-                              _buildLowercaseButton(),
-                              _buildCapitalizeButton(),
-                              const VerticalDivider(),
-                              _buildOcclusionButton(),
-                              _buildImageButton(),
-                              _buildLatexButton(),
-                              _buildTableButton(),
-                              _buildMarkdownButton(),
-                              _buildEditOcclusionsButton(),
-                              const VerticalDivider(),
-                              _buildExportPdfButton(),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  secondChild: const SizedBox.shrink(),
-                  crossFadeState: _isToolbarCollapsed
-                      ? CrossFadeState.showSecond
-                      : CrossFadeState.showFirst,
-                  duration: const Duration(milliseconds: 200),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ),
-        ],
+          );
+        },
+      ),
+    );
+  }
 
-        // Editor
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: _isDragging ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3) : Theme.of(context).colorScheme.surface,
-              border: Border.all(
-                color: _isDragging ? Theme.of(context).colorScheme.primary : Theme.of(context).dividerColor,
-                width: _isDragging ? 2 : 1,
+  @override
+  Widget build(BuildContext context) {
+    Widget editorContent = LayoutBuilder(
+      builder: (context, total) {
+        final esquemaVisible = !widget.readOnly && _calcularEsquemaVisible(total.maxWidth);
+        _esquemaVisibleActual = esquemaVisible;
+        return Column(
+          children: [
+            if (!widget.readOnly && !_isToolbarCollapsed)
+              BarraEditor(
+                controller: _controller,
+                acciones: _acciones,
+                esquemaVisible: esquemaVisible,
+                onAlternarEsquema: _alternarEsquema,
+                onPlegar: () => setState(() => _isToolbarCollapsed = true),
+                imagenOcluidaEnCursor: _isImageOccludedAtCursor,
+                alTerminar: _devolverFoco,
               ),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.all(16),
-            child: quill.QuillEditor.basic(
-              controller: _controller,
-              config: quill.QuillEditorConfig(
-                scrollable: true,
-                autoFocus: false,
-                expands: false,
-                padding: EdgeInsets.zero,
-                placeholder: widget.readOnly
-                    ? ''
-                    : 'Escribe aquí... Puedes arrastrar imágenes o usar Ctrl+V para pegar',
-                embedBuilders: const [
-                  ImageEmbedBuilder(),
-                  ImageOccludedEmbedBuilder(),
-                  LatexEmbedBuilder(),
-                  LatexOccludedEmbedBuilder(),
-                  TableEmbedBuilder(),
-                  TableOccludedEmbedBuilder(),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _zonaTrabajo(context)),
+                  if (esquemaVisible)
+                    PanelEsquema(
+                      controller: _controller,
+                      titulos: _titulos,
+                      onIrA: _irATitulo,
+                      onCerrar: () => setState(() => _esquemaElegido = false),
+                    ),
                 ],
               ),
-              scrollController: _scrollController,
             ),
-          ),
-        ),
-      ],
+            if (!widget.readOnly)
+              BarraEstadoEditor(
+                estadisticas: _estadisticas,
+                estiloActual: _estiloActual,
+                estadoGuardado: widget.estadoGuardado,
+                acciones: widget.accionesEstado,
+                herramientasPlegadas: _isToolbarCollapsed,
+                onMostrarHerramientas: () => setState(() => _isToolbarCollapsed = false),
+              ),
+          ],
+        );
+      },
     );
 
     // Envolver con DropTarget solo en desktop (no funciona en móvil)
@@ -2705,41 +2973,21 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
       );
     }
 
-    // Envolver con Shortcuts y Actions para atajos de teclado
+    // Atajos cuando el foco no está en el texto (p. ej. tras pulsar un
+    // botón). Con el foco en el texto los resuelve el propio QuillEditor
+    // (customShortcuts), que tiene prioridad sobre los suyos por defecto.
     if (!widget.readOnly) {
       editorContent = Shortcuts(
         shortcuts: <ShortcutActivator, Intent>{
-          EditorShortcuts.superscript: const _EditorIntent('superscript'),
-          EditorShortcuts.subscript: const _EditorIntent('subscript'),
+          ..._atajosEditor,
           EditorShortcuts.uppercase: const _EditorIntent('uppercase'),
           EditorShortcuts.lowercase: const _EditorIntent('lowercase'),
-          EditorShortcuts.capitalize: const _EditorIntent('capitalize'),
-          EditorShortcuts.pasteMarkdown: const _EditorIntent('pasteMarkdown'),
         },
         child: Actions(
           actions: <Type, Action<Intent>>{
             _EditorIntent: CallbackAction<_EditorIntent>(
               onInvoke: (intent) {
-                switch (intent.action) {
-                  case 'superscript':
-                    _applySuperscript();
-                    break;
-                  case 'subscript':
-                    _applySubscript();
-                    break;
-                  case 'uppercase':
-                    _transformToUppercase();
-                    break;
-                  case 'lowercase':
-                    _transformToLowercase();
-                    break;
-                  case 'capitalize':
-                    _transformToCapitalize();
-                    break;
-                  case 'pasteMarkdown':
-                    _handleSmartPaste();
-                    break;
-                }
+                _ejecutarAtajo(intent.action);
                 return null;
               },
             ),
@@ -2754,74 +3002,6 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
     }
 
     return editorContent;
-  }
-
-  // ========== NUEVOS BOTONES DEL TOOLBAR ==========
-
-  Widget _buildSuperscriptButton() {
-    return Tooltip(
-      message: 'Superíndice (Ctrl+.)',
-      child: IconButton(
-        icon: const Icon(Icons.superscript, size: 20),
-        onPressed: _applySuperscript,
-        color: Theme.of(context).colorScheme.primary,
-      ),
-    );
-  }
-
-  Widget _buildSubscriptButton() {
-    return Tooltip(
-      message: 'Subíndice (Ctrl+,)',
-      child: IconButton(
-        icon: const Icon(Icons.subscript, size: 20),
-        onPressed: _applySubscript,
-        color: Theme.of(context).colorScheme.primary,
-      ),
-    );
-  }
-
-  Widget _buildUppercaseButton() {
-    return Tooltip(
-      message: 'MAYÚSCULAS',
-      child: IconButton(
-        icon: const Icon(Icons.text_fields, size: 20),
-        onPressed: _transformToUppercase,
-        color: Theme.of(context).colorScheme.secondary,
-      ),
-    );
-  }
-
-  Widget _buildLowercaseButton() {
-    return Tooltip(
-      message: 'minúsculas',
-      child: IconButton(
-        icon: const Icon(Icons.text_decrease, size: 20),
-        onPressed: _transformToLowercase,
-        color: Theme.of(context).colorScheme.secondary,
-      ),
-    );
-  }
-
-  Widget _buildCapitalizeButton() {
-    return Tooltip(
-      message: 'Capitalizar',
-      child: IconButton(
-        icon: const Icon(Icons.title, size: 20),
-        onPressed: _transformToCapitalize,
-        color: Theme.of(context).colorScheme.secondary,
-      ),
-    );
-  }
-
-  Widget _buildExportPdfButton() {
-    return Tooltip(
-      message: 'Exportar a PDF',
-      child: IconButton(
-        icon: const Icon(Icons.picture_as_pdf, size: 20),
-        onPressed: _exportToPdf,
-        color: Colors.red.shade600,
-      ),
-    );
   }
 
   Future<void> _exportToPdf() async {
@@ -2965,6 +3145,11 @@ class _RichDocumentEditorState extends State<RichDocumentEditor> {
         }
         if (attributes['background'] != null) {
           bgColor = _parseColor(attributes['background'].toString());
+        }
+        // Oclusión de texto (formato nuevo): se marca con el mismo amarillo
+        // que el formato antiguo para que se vea en el PDF.
+        if (attributes[OclusionTexto.clave] == true) {
+          bgColor = _parseColor(OclusionTexto.fondoLegado);
         }
       }
 
@@ -3384,6 +3569,7 @@ class DocumentViewer extends StatelessWidget {
           LatexEmbedBuilder(),
           TableEmbedBuilder(),
         ],
+        customStyleBuilder: (attr) => estiloOclusionEditor(context, attr),
       ),
     );
   }
@@ -3448,7 +3634,7 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
             // Header
             Row(
               children: [
-                const Icon(Icons.functions, color: Colors.purple, size: 28),
+                Icon(Icons.functions, color: Theme.of(context).colorScheme.primary, size: 28),
                 const SizedBox(width: 12),
                 const Text(
                   'Insertar Ecuación LaTeX',
@@ -3468,7 +3654,7 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
             Text(
               'Escribe tu ecuación en formato LaTeX. Puedes agregar oclusiones después.',
               style: TextStyle(
-                color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
+                color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7),
               ),
             ),
             const Divider(height: 24),
@@ -3482,15 +3668,17 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
             TextField(
               controller: _latexController,
               maxLines: 5,
-              style: const TextStyle(
+              autofocus: true,
+              style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
               decoration: InputDecoration(
                 hintText: 'Ejemplo: E = mc^2\n\\frac{a}{b}\n\\sum_{i=1}^{n} i',
                 border: const OutlineInputBorder(),
                 filled: true,
-                fillColor: Colors.grey.shade50,
+                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
               onChanged: (value) {
                 setState(() {});
@@ -3509,9 +3697,9 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.purple.shade50,
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.purple.shade200),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: Center(
                   child: _buildLatexPreview(),
@@ -3525,9 +3713,9 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
+                  color: Theme.of(context).colorScheme.surfaceContainerHigh,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade200),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.6)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3540,7 +3728,7 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
                           'Oclusiones (opcional)',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade900,
+                            color: Theme.of(context).colorScheme.onSurface,
                             fontSize: 15,
                           ),
                         ),
@@ -3552,7 +3740,7 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
                       'Selecciona qué partes del código LaTeX quieres que se muestren como [?] cuando estudies.',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Colors.grey.shade700,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -3569,12 +3757,12 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
                         _occlusions != null && _occlusions!.isNotEmpty
                             ? '✓ ${_occlusions!.length} oclusión(es) configurada(s)'
                             : 'Configurar oclusiones',
-                        style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.w600),
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontWeight: FontWeight.w600),
                       ),
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: Colors.orange, width: 2),
                         backgroundColor: _occlusions != null && _occlusions!.isNotEmpty
-                            ? Colors.orange.shade100
+                            ? Colors.orange.withValues(alpha: 0.15)
                             : null,
                       ),
                     ),
@@ -3633,10 +3821,10 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
           // Versión procesada más legible
           Text(
             processedText,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 24,
               fontStyle: FontStyle.italic,
-              color: Colors.black87,
+              color: Theme.of(context).colorScheme.onSurface,
               letterSpacing: 1.2,
             ),
             textAlign: TextAlign.center,
@@ -3650,7 +3838,7 @@ class _LatexInputDialogState extends State<_LatexInputDialog> {
             style: TextStyle(
               fontFamily: 'monospace',
               fontSize: 12,
-              color: Colors.grey.shade700,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
             textAlign: TextAlign.center,
           ),
@@ -3867,9 +4055,17 @@ class _TableInputDialogState extends State<_TableInputDialog> {
   }
 
   void _saveTable() {
-    final cells = _cellControllers
-        .map((row) => row.map((controller) => controller.text).toList())
-        .toList();
+    // Se guarda exactamente lo que se ve: un encabezado vacío se guarda con
+    // el mismo texto que sugiere el campo ("Encabezado N"); las celdas del
+    // cuerpo vacías quedan vacías (su campo no sugiere ningún texto).
+    final cells = List.generate(
+      _rows,
+      (fila) => List.generate(_columns, (col) {
+        final texto = _cellControllers[fila][col].text.trim();
+        if (texto.isEmpty && fila == 0) return 'Encabezado ${col + 1}';
+        return texto;
+      }),
+    );
 
     Navigator.of(context).pop({
       'rows': _rows,
@@ -3880,17 +4076,26 @@ class _TableInputDialogState extends State<_TableInputDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final pantalla = MediaQuery.of(context).size;
+    // Paso 1 (filas/columnas): diálogo compacto de ~420 px.
+    // Paso 2 (celdas): ancho según columnas, sin pasar del 90 % de la pantalla.
+    final ancho = _showEditor
+        ? math.min(pantalla.width * 0.9, math.max(420.0, _columns * 158.0 + 8))
+        : 420.0;
+    final alto = _showEditor
+        ? math.min(pantalla.height * 0.65, _rows * 60.0 + 48)
+        : null;
     return AlertDialog(
       title: Row(
         children: [
-          const Icon(Icons.table_chart, color: Colors.teal),
+          Icon(Icons.table_chart, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 8),
-          Text(widget.initialCells != null ? 'Editar Tabla' : 'Crear Tabla'),
+          Text(widget.initialCells != null ? 'Editar tabla' : 'Crear tabla'),
         ],
       ),
       content: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.8,
-        height: MediaQuery.of(context).size.height * 0.7,
+        width: ancho,
+        height: alto,
         child: _showEditor ? _buildTableEditor() : _buildSizeSelector(),
       ),
       actions: [
@@ -3919,31 +4124,44 @@ class _TableInputDialogState extends State<_TableInputDialog> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Especifica el tamaño de la tabla:',
-          style: TextStyle(fontSize: 14, color: Colors.grey),
+        Text(
+          'Tamaño de la tabla (la primera fila es el encabezado):',
+          style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         const SizedBox(height: 16),
-        TextField(
-          controller: _rowsController,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Número de filas',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.table_rows),
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _rowsController,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                onSubmitted: (_) => _createTable(),
+                decoration: const InputDecoration(
+                  labelText: 'Filas',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon: Icon(Icons.table_rows),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _columnsController,
+                keyboardType: TextInputType.number,
+                onSubmitted: (_) => _createTable(),
+                decoration: const InputDecoration(
+                  labelText: 'Columnas',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon: Icon(Icons.view_column),
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _columnsController,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Número de columnas',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.view_column),
-          ),
-        ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         Row(
           children: [
             Expanded(child: Divider(color: Colors.grey.shade400)),
@@ -3957,20 +4175,20 @@ class _TableInputDialogState extends State<_TableInputDialog> {
             Expanded(child: Divider(color: Colors.grey.shade400)),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: _pasteFromExcel,
-          icon: const Icon(Icons.content_paste, color: Colors.teal),
+          icon: const Icon(Icons.content_paste),
           label: const Text('Pegar desde Excel/Sheets'),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            side: BorderSide(color: Colors.teal.shade300, width: 2),
-          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Text(
-          'Copia celdas desde Excel/Google Sheets y pégalas aquí',
-          style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+          'Copia celdas en Excel/Google Sheets y pulsa aquí',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontStyle: FontStyle.italic,
+          ),
           textAlign: TextAlign.center,
         ),
       ],
@@ -3982,15 +4200,15 @@ class _TableInputDialogState extends State<_TableInputDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Edita el contenido de cada celda:',
-            style: TextStyle(fontSize: 14, color: Colors.grey),
+          Text(
+            'Contenido de cada celda (la primera fila es el encabezado):',
+            style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Table(
-              border: TableBorder.all(color: Colors.grey.shade300),
+              border: TableBorder.all(color: Theme.of(context).colorScheme.outlineVariant),
               defaultColumnWidth: const FixedColumnWidth(150),
               children: List.generate(
                 _rows,
@@ -4001,11 +4219,12 @@ class _TableInputDialogState extends State<_TableInputDialog> {
                       padding: const EdgeInsets.all(4),
                       child: TextField(
                         controller: _cellControllers[rowIndex][colIndex],
+                        // Solo el encabezado sugiere texto, y es el que se
+                        // guardará si se deja vacío (ver _saveTable).
                         decoration: InputDecoration(
-                          hintText: rowIndex == 0
-                              ? 'Encabezado ${colIndex + 1}'
-                              : 'Fila ${rowIndex + 1}, Col ${colIndex + 1}',
+                          hintText: rowIndex == 0 ? 'Encabezado ${colIndex + 1}' : null,
                           border: const OutlineInputBorder(),
+                          isDense: true,
                           contentPadding: const EdgeInsets.all(8),
                         ),
                         style: TextStyle(

@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../data/statistics_datasource.dart';
+import '../../../notes/data/datasources/notes_srs_datasource.dart';
 
 // Events
 abstract class DashboardEvent extends Equatable {
@@ -68,6 +69,9 @@ class DashboardStatistics extends Equatable {
   final Map<int, int> weeklyMinutes;
   final int notesNeedingReview;
 
+  /// Resumen SRS real; null mientras no se ha cargado.
+  final ResumenSrs? srs;
+
   const DashboardStatistics({
     required this.totalCourses,
     required this.totalNotes,
@@ -77,6 +81,7 @@ class DashboardStatistics extends Equatable {
     required this.todayPomodoroMinutes,
     required this.weeklyMinutes,
     required this.notesNeedingReview,
+    this.srs,
   });
 
   String get totalStudyTime {
@@ -107,6 +112,11 @@ class DashboardStatistics extends Equatable {
         todayPomodoroMinutes,
         weeklyMinutes,
         notesNeedingReview,
+        srs?.pendientesHoy,
+        srs?.nuevasDisponiblesHoy,
+        srs?.repasadasHoy,
+        srs?.racha,
+        srs?.retencion30,
       ];
 }
 
@@ -154,6 +164,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       _statisticsDataSource.getTodayPomodoroMinutes(userId),
       _statisticsDataSource.getWeeklyStudyTimeMinutes(userId),
       _statisticsDataSource.getNotesNeedingReviewCount(userId),
+      _statisticsDataSource.getResumenSrs(userId),
     ]);
 
     return DashboardStatistics(
@@ -165,6 +176,7 @@ class DashboardBloc extends Bloc<DashboardEvent, DashboardState> {
       todayPomodoroMinutes: results[5] as int,
       weeklyMinutes: results[6] as Map<int, int>,
       notesNeedingReview: results[7] as int,
+      srs: results[8] as ResumenSrs,
     );
   }
 }

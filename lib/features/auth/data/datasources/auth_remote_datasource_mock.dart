@@ -47,7 +47,7 @@ class AuthRemoteDataSourceMockImpl implements AuthRemoteDataSource {
           final user = entry.value as Map<String, dynamic>;
           return user['email'] == email;
         },
-        orElse: () => throw app_exceptions.AuthException('Usuario no encontrado'),
+        orElse: () => throw const app_exceptions.AuthException('Usuario no encontrado'),
       );
 
       final userData = userEntry.value as Map<String, dynamic>;
@@ -185,7 +185,7 @@ class AuthRemoteDataSourceMockImpl implements AuthRemoteDataSource {
       });
 
       if (!emailExists) {
-        throw const app_exceptions.AuthException('Email no encontrado');
+        throw const app_exceptions.AuthException('Correo no encontrado');
       }
 
       // En un mock, simplemente simulamos que se envió el email

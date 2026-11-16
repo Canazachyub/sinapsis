@@ -2,7 +2,7 @@ name: sinapsis
 description: "Sistema Integral de Estudio y Repaso Activo - Aplicación multiplataforma de estudio con flashcards, cloze tests y sincronización en tiempo real"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.5.0
@@ -58,6 +58,8 @@ dependencies:
   flutter_dotenv: ^6.0.0
   logger: ^2.0.2+1
   dartz: ^0.10.1
+  crypto: ^3.0.7                    # md5 para deduplicar importaciones
+  file_selector_platform_interface: ^2.7.0  # diálogo "Guardar como" (copia de seguridad)
 
   # UI Components
   shimmer: ^3.0.0
@@ -66,6 +68,7 @@ dependencies:
   # Markdown
   flutter_markdown: ^0.7.7+1
   markdown: ^7.2.1
+  html: ^0.15.6
 
   # LaTeX - Sin paquete externo por conflictos de dependencias
   # Usando renderizado custom

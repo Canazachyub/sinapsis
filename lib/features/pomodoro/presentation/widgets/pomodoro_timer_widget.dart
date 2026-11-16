@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'dart:math' as math;
 import '../bloc/pomodoro_bloc.dart';
+import 'iniciar_pomodoro.dart';
 import '../../domain/entities/pomodoro_session.dart';
 
 /// Widget del temporizador Pomodoro con diseño circular
@@ -110,7 +111,7 @@ class PomodoroTimerWidget extends StatelessWidget {
             painter: _CircularProgressPainter(
               progress: progress,
               color: progressColor,
-              backgroundColor: progressColor.withOpacity(0.1),
+              backgroundColor: progressColor.withValues(alpha: 0.1),
             ),
           ),
           // Tiempo en el centro
@@ -174,7 +175,7 @@ class PomodoroTimerWidget extends StatelessWidget {
           ),
           const SizedBox(width: 16),
           IconButton.filled(
-            onPressed: () => bloc.add(const StopPomodoro()),
+            onPressed: () => detenerPomodoroConConfirmacion(context),
             icon: const Icon(Icons.stop),
             tooltip: 'Detener',
             style: IconButton.styleFrom(
@@ -213,7 +214,7 @@ class PomodoroTimerWidget extends StatelessWidget {
           ),
           const SizedBox(width: 16),
           ElevatedButton.icon(
-            onPressed: () => bloc.add(const StopPomodoro()),
+            onPressed: () => detenerPomodoroConConfirmacion(context),
             icon: const Icon(Icons.stop),
             label: const Text('Cancelar'),
             style: ElevatedButton.styleFrom(
@@ -317,7 +318,7 @@ class PomodoroTimerWidget extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+        color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(

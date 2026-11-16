@@ -4,7 +4,6 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
-  clipboard
   desktop_drop
   file_selector_windows
   irondash_engine_context

@@ -159,7 +159,7 @@ class QuillToMarkdown {
     String result = text;
 
     // Oclusión (resaltado amarillo especial)
-    if (attributes['background'] == '#FFEB3B') {
+    if (attributes['background'] == '#FFEB3B' || attributes['oclusion'] == true) {
       result = '==$result==';
     }
 

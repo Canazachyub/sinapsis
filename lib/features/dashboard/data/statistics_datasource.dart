@@ -2,7 +2,11 @@ import 'package:drift/drift.dart' hide Column;
 import '../../../core/database/database.dart';
 import '../../notes/data/datasources/notes_srs_datasource.dart';
 
-/// DataSource para obtener estadísticas de la base de datos
+/// Estadísticas del dashboard.
+///
+/// Cursos, notas y repaso espaciado se leen de SharedPreferences (los datos
+/// reales, vía [NotesSRSDataSource]). Drift solo se usa para sesiones de
+/// estudio y pomodoro.
 class StatisticsDataSource {
   final AppDatabase _db;
   final NotesSRSDataSource _srsDataSource;
@@ -10,20 +14,12 @@ class StatisticsDataSource {
   StatisticsDataSource(this._db, this._srsDataSource);
 
   /// Obtener total de cursos por usuario
-  Future<int> getTotalCoursesByUser(String userId) async {
-    final query = _db.select(_db.courses)
-      ..where((c) => c.userId.equals(userId));
-    final courses = await query.get();
-    return courses.length;
-  }
+  Future<int> getTotalCoursesByUser(String userId) =>
+      _srsDataSource.contarCursos(userId);
 
   /// Obtener total de notas por usuario
-  Future<int> getTotalNotesByUser(String userId) async {
-    final query = _db.select(_db.notes)
-      ..where((n) => n.userId.equals(userId));
-    final notes = await query.get();
-    return notes.length;
-  }
+  Future<int> getTotalNotesByUser(String userId) =>
+      _srsDataSource.contarNotas(userId);
 
   /// Obtener total de sesiones de estudio por usuario
   Future<int> getTotalStudySessionsByUser(String userId) async {
@@ -96,44 +92,8 @@ class StatisticsDataSource {
     return await _srsDataSource.getNotesNeedingReviewCount(userId);
   }
 
-  /// Obtener estadísticas de retención (notas revisadas vs fallidas)
-  Future<Map<String, int>> getRetentionStats(String userId) async {
-    final query = _db.select(_db.notes)
-      ..where((n) => n.userId.equals(userId));
-
-    final allNotes = await query.get();
-
-    // Filtrar solo notas revisadas al menos una vez
-    final notes = allNotes.where((n) => n.reviewCount >= 1).toList();
-
-    int easyCount = 0;
-    int mediumCount = 0;
-    int hardCount = 0;
-    int newCount = 0;
-
-    for (final note in notes) {
-      switch (note.difficulty) {
-        case 1:
-          easyCount++;
-          break;
-        case 2:
-          mediumCount++;
-          break;
-        case 3:
-          hardCount++;
-          break;
-        default:
-          newCount++;
-      }
-    }
-
-    return {
-      'easy': easyCount,
-      'medium': mediumCount,
-      'hard': hardCount,
-      'new': newCount,
-    };
-  }
+  /// Resumen real del repaso espaciado (pendientes, nuevas, racha, retención).
+  Future<ResumenSrs> getResumenSrs(String userId) => _srsDataSource.resumen(userId);
 
   /// Obtener sesiones de Pomodoro de hoy con detalles
   Future<List<PomodoroSession>> getTodayPomodoros(String userId) async {

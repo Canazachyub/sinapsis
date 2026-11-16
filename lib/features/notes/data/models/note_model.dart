@@ -94,10 +94,20 @@ sealed class NoteModel with _$NoteModel {
     @Default([]) List<ImageOcclusionModel> imageOcclusions,
     required DateTime createdAt,
     required DateTime updatedAt,
+    // ---- Repaso espaciado (SM-2). Opcionales: las notas antiguas sin estos
+    // campos cargan como "nuevas". Solo se guardan en local (NOTES_DATA);
+    // no viajan a Supabase (ver docs/SRS.md).
+    @Default(2.5) double srsEase,
+    @Default(0) int srsInterval, // días
+    @Default(0) int srsRepetitions,
+    DateTime? srsDue, // null = nueva
+    @Default(0) int srsLapses,
+    DateTime? srsLastReview,
   }) = _NoteModel;
 
+  /// Tolerante: ignora campos SRS ausentes o con tipos incorrectos.
   factory NoteModel.fromJson(Map<String, dynamic> json) =>
-      _$NoteModelFromJson(json);
+      _$NoteModelFromJson(limpiarCamposSrs(json));
 
   factory NoteModel.fromEntity(Note note) {
     return NoteModel(
@@ -115,8 +125,34 @@ sealed class NoteModel with _$NoteModel {
           .toList(),
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
+      srsEase: note.srs.ease,
+      srsInterval: note.srs.intervalo,
+      srsRepetitions: note.srs.repeticiones,
+      srsDue: note.srs.vence,
+      srsLapses: note.srs.lapsos,
+      srsLastReview: note.srs.ultimoRepaso,
     );
   }
+
+  /// Estado SRS de esta nota.
+  EstadoSrs get srs => EstadoSrs(
+        ease: srsEase,
+        intervalo: srsInterval,
+        repeticiones: srsRepetitions,
+        vence: srsDue,
+        lapsos: srsLapses,
+        ultimoRepaso: srsLastReview,
+      );
+
+  /// Copia con otro estado SRS (permite volver a `null` las fechas).
+  NoteModel conSrs(EstadoSrs e) => copyWith(
+        srsEase: e.ease,
+        srsInterval: e.intervalo,
+        srsRepetitions: e.repeticiones,
+        srsDue: e.vence,
+        srsLapses: e.lapsos,
+        srsLastReview: e.ultimoRepaso,
+      );
 
   Note toEntity() {
     return Note(
@@ -130,6 +166,37 @@ sealed class NoteModel with _$NoteModel {
       imageOcclusions: imageOcclusions.map((o) => o.toEntity()).toList(),
       createdAt: createdAt,
       updatedAt: updatedAt,
+      srs: srs,
     );
   }
+}
+
+/// Elimina del JSON los campos SRS con tipos inválidos para que
+/// `fromJson` use los valores por defecto en vez de lanzar.
+Map<String, dynamic> limpiarCamposSrs(Map<String, dynamic> json) {
+  const numericos = ['srsEase', 'srsInterval', 'srsRepetitions', 'srsLapses'];
+  const fechas = ['srsDue', 'srsLastReview'];
+  var limpio = json;
+  void quitar(String k) {
+    if (identical(limpio, json)) limpio = Map<String, dynamic>.from(json);
+    limpio.remove(k);
+  }
+
+  for (final k in numericos) {
+    final v = json[k];
+    if (v != null && v is! num) quitar(k);
+  }
+  for (final k in fechas) {
+    final v = json[k];
+    if (v != null && (v is! String || DateTime.tryParse(v) == null)) quitar(k);
+  }
+  // Los enteros podrían llegar como double (p. ej. 6.0).
+  for (final k in ['srsInterval', 'srsRepetitions', 'srsLapses']) {
+    final v = limpio[k];
+    if (v is double) {
+      if (identical(limpio, json)) limpio = Map<String, dynamic>.from(json);
+      limpio[k] = v.round();
+    }
+  }
+  return limpio;
 }

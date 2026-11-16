@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:sinapsis/features/pomodoro/presentation/bloc/pomodoro_bloc.dart';
@@ -13,6 +14,7 @@ void main() {
   late MockPomodoroBloc mockBloc;
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     mockBloc = MockPomodoroBloc();
   });
 
@@ -224,12 +226,12 @@ void main() {
       await tester.pumpWidget(createWidgetUnderTest());
       await tester.pump();
 
-      // Encontrar el Positioned principal del widget flotante (el que tiene top > 100)
+      // Encontrar el Positioned principal del widget flotante
       final positionedFinder = find.byWidgetPredicate(
         (widget) => widget is Positioned &&
             widget.left != null &&
             widget.top != null &&
-            widget.top! > 100, // El widget flotante estará más abajo
+            widget.right == null, // excluye el Positioned interno de la barra
       );
       expect(positionedFinder, findsOneWidget);
 
@@ -243,8 +245,10 @@ void main() {
         matching: find.byType(Material),
       );
 
-      await tester.drag(materialFinder.first, const Offset(-100, 0));
-      await tester.pump();
+      // Arriba a la derecha por defecto: se arrastra hacia la izquierda y,
+      // al soltar, se acopla al borde izquierdo.
+      await tester.drag(materialFinder.first, const Offset(-600, 0));
+      await tester.pumpAndSettle();
 
       // Verificar que la posicion cambio
       final updatedWidget = tester.widget<Positioned>(positionedFinder);

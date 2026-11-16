@@ -5,14 +5,17 @@ import 'dart:convert';
 /// Soporta todas las reglas de sintaxis Markdown estándar
 class MarkdownToQuill {
   static String convert(String markdownText) {
+    // Normalizar viñetas "•", "–" de texto pegado a listas Markdown
+    final conVinetas = _fueraDeCodigo(markdownText, _normalizarVinetas);
+
     // Pre-procesar reglas horizontales PRIMERO (antes de otros procesamientos)
-    final textWithRules = _preprocessHorizontalRules(markdownText);
+    final textWithRules = _fueraDeCodigo(conVinetas, _preprocessHorizontalRules);
 
     // Pre-procesar el texto para formatos extendidos
-    final processedText = _preprocessExtendedMarkdown(textWithRules);
+    final processedText = _fueraDeCodigo(textWithRules, _preprocessExtendedMarkdown);
 
     // Pre-procesar tablas antes de parsear
-    final textWithTables = _preprocessTables(processedText);
+    final textWithTables = _fueraDeCodigo(processedText, _preprocessTables);
 
     // Parsear markdown con extensiones completas
     final document = md.Document(
@@ -33,12 +36,171 @@ class MarkdownToQuill {
     // Post-procesar para convertir marcadores de reglas horizontales
     _processHorizontalRuleEmbeds(deltaOps);
 
+    // Etiquetas HTML en línea (<u>, <sup>, <sub>, <mark>, <br>...) → atributos
+    final ops = _procesarHtmlEnLinea(deltaOps);
+
     // Asegurar que termine con newline
-    if (deltaOps.isEmpty || deltaOps.last['insert'] != '\n') {
-      deltaOps.add({'insert': '\n'});
+    if (ops.isEmpty || ops.last['insert'] != '\n') {
+      ops.add({'insert': '\n'});
     }
 
-    return jsonEncode(deltaOps);
+    return jsonEncode(ops);
+  }
+
+  /// Aplica [fn] solo a los tramos de texto que NO están dentro de bloques
+  /// de código cercados (``` o ~~~), para no alterar el código.
+  static String _fueraDeCodigo(String texto, String Function(String) fn) {
+    final lineas = texto.split('\n');
+    final salida = <String>[];
+    final tramo = <String>[];
+    String? marca; // carácter de la valla abierta
+    int largo = 0;
+
+    void volcar() {
+      if (tramo.isEmpty) return;
+      salida.addAll(fn(tramo.join('\n')).split('\n'));
+      tramo.clear();
+    }
+
+    for (final linea in lineas) {
+      final t = linea.trimLeft();
+      final m = RegExp(r'^(`{3,}|~{3,})').firstMatch(t);
+      if (marca == null) {
+        if (m != null) {
+          volcar();
+          marca = m.group(1)![0];
+          largo = m.group(1)!.length;
+          salida.add(linea);
+        } else {
+          tramo.add(linea);
+        }
+      } else {
+        salida.add(linea);
+        if (m != null && m.group(1)![0] == marca && m.group(1)!.length >= largo
+            && t.substring(m.group(1)!.length).trim().isEmpty) {
+          marca = null;
+        }
+      }
+    }
+    volcar();
+    return salida.join('\n');
+  }
+
+  /// Convierte viñetas tipográficas (•, ◦, ▪, ‣, ∙) y guiones largos (–, —)
+  /// repetidos en listas Markdown ("- ").
+  static String _normalizarVinetas(String texto) {
+    final lineas = texto.split('\n');
+    final reVineta = RegExp(r'^(\s*)[•◦▪▫‣∙●○■□]\s+(.*)$');
+    final reGuion = RegExp(r'^(\s*)[–—]\s+(.*)$');
+    for (int i = 0; i < lineas.length; i++) {
+      final m = reVineta.firstMatch(lineas[i]);
+      if (m != null) {
+        lineas[i] = '${m.group(1)}- ${m.group(2)}';
+        continue;
+      }
+      // Guion largo: solo si forma una racha de >= 2 líneas (evita diálogos)
+      if (reGuion.hasMatch(lineas[i])) {
+        final vecina = (i > 0 && reGuion.hasMatch(lineas[i - 1])) ||
+            (i + 1 < lineas.length && reGuion.hasMatch(lineas[i + 1]));
+        if (vecina) {
+          final g = reGuion.firstMatch(lineas[i])!;
+          lineas[i] = '${g.group(1)}- ${g.group(2)}';
+        }
+      }
+    }
+    return lineas.join('\n');
+  }
+
+  static final _reEtiquetaEnLinea = RegExp(
+    r'<(/?)(u|sup|sub|mark|br|strong|b|em|i|s|del)\s*/?>',
+    caseSensitive: false,
+  );
+
+  /// Convierte etiquetas HTML en línea que el parser Markdown deja como texto
+  /// literal (`<u>`, `<sup>`, `<sub>`, `<mark>`, `<br>`, ...) en atributos Delta.
+  static List<Map<String, dynamic>> _procesarHtmlEnLinea(
+      List<Map<String, dynamic>> ops) {
+    final salida = <Map<String, dynamic>>[];
+    final activos = <String, int>{};
+
+    // Un tramo = ops hasta el siguiente salto de línea. Se omite si es código.
+    int inicio = 0;
+    while (inicio < ops.length) {
+      int fin = inicio;
+      while (fin < ops.length && ops[fin]['insert'] != '\n') {
+        fin++;
+      }
+      final esCodigo = fin < ops.length &&
+          (ops[fin]['attributes'] is Map) &&
+          (ops[fin]['attributes'] as Map)['code-block'] == true;
+      activos.clear();
+      for (int i = inicio; i <= fin && i < ops.length; i++) {
+        final op = ops[i];
+        final ins = op['insert'];
+        final attrs = op['attributes'] as Map<String, dynamic>?;
+        final esCodigoEnLinea = attrs != null && attrs['code'] == true;
+        if (ins is! String || esCodigo || esCodigoEnLinea || !ins.contains('<')) {
+          salida.add(op);
+          continue;
+        }
+        int ultimo = 0;
+        bool saltarNewline = false;
+        void literal(String t) {
+          if (saltarNewline && t.startsWith('\n')) {
+            t = t.substring(1);
+          }
+          saltarNewline = false;
+          if (t.isEmpty) return;
+          final extra = <String, dynamic>{...?attrs};
+          activos.forEach((tag, n) {
+            if (n <= 0) return;
+            switch (tag) {
+              case 'u':
+                extra['underline'] = true;
+              case 'sup':
+                extra['script'] = 'super';
+              case 'sub':
+                extra['script'] = 'sub';
+              case 'mark':
+                extra['highlight'] = true;
+              case 'strong':
+              case 'b':
+                extra['bold'] = true;
+              case 'em':
+              case 'i':
+                extra['italic'] = true;
+              case 's':
+              case 'del':
+                extra['strike'] = true;
+            }
+          });
+          salida.add({
+            'insert': t,
+            if (extra.isNotEmpty) 'attributes': extra,
+          });
+        }
+
+        for (final m in _reEtiquetaEnLinea.allMatches(ins)) {
+          literal(ins.substring(ultimo, m.start));
+          ultimo = m.end;
+          final tag = m.group(2)!.toLowerCase();
+          if (tag == 'br') {
+            salida.add({'insert': '\n'});
+            saltarNewline = true;
+            continue;
+          }
+          saltarNewline = false;
+          if (m.group(1) == '/') {
+            activos[tag] = (activos[tag] ?? 1) - 1;
+          } else {
+            activos[tag] = (activos[tag] ?? 0) + 1;
+          }
+        }
+        literal(ins.substring(ultimo));
+      }
+      inicio = fin + 1;
+    }
+    return salida;
   }
 
   /// Pre-procesa reglas horizontales (---, ***, ___)
@@ -252,40 +414,40 @@ class MarkdownToQuill {
     }
   }
 
-  /// Pre-procesa formatos extendidos que no son parte de MD estándar
+  /// Pre-procesa formatos extendidos que no son parte de MD estándar.
+  /// Trabaja línea a línea (no cruza saltos de línea), respeta caracteres
+  /// escapados con `\` y no toca las filas de tabla (`| ... |`).
   static String _preprocessExtendedMarkdown(String text) {
-    // Convertir formatos extendidos a HTML que el parser puede entender
-    String result = text;
+    final lineas = text.split('\n');
+    for (int i = 0; i < lineas.length; i++) {
+      var l = lineas[i];
+      if (l.trimLeft().startsWith('|')) continue;
 
-    // REGLA: Salto de línea dentro del mismo párrafo (2 espacios + Enter)
-    // Convertir "text  \n" → "text<br>\n"
-    result = result.replaceAllMapped(
-      RegExp(r'[ ]{2,}\n'),
-      (match) => '<br>\n',
-    );
+      // REGLA: Salto de línea dentro del mismo párrafo (2 espacios + Enter)
+      if (i < lineas.length - 1 && RegExp(r'\S[ ]{2,}$').hasMatch(l)) {
+        l = '${l.trimRight()}<br>';
+      }
 
-    // Proteger emojis y caracteres especiales dentro de líneas de texto
-    // Esto evita que los emojis interfieran con el parsing de Markdown
+      // Superíndice: ^text^ → <sup>text</sup>
+      l = l.replaceAllMapped(
+        RegExp(r'(?<!\\)\^([^^]+)(?<!\\)\^'),
+        (m) => '<sup>${m.group(1)}</sup>',
+      );
 
-    // Superíndice: ^text^ → <sup>text</sup>
-    result = result.replaceAllMapped(
-      RegExp(r'\^([^^]+)\^'),
-      (match) => '<sup>${match.group(1)}</sup>',
-    );
+      // Subíndice: ~text~ (pero no ~~text~~) → <sub>text</sub>
+      l = l.replaceAllMapped(
+        RegExp(r'(?<![~\\])~([^~]+)(?<!\\)~(?!~)'),
+        (m) => '<sub>${m.group(1)}</sub>',
+      );
 
-    // Subíndice: ~text~ (pero no ~~text~~) → <sub>text</sub>
-    result = result.replaceAllMapped(
-      RegExp(r'(?<!~)~([^~]+)~(?!~)'),
-      (match) => '<sub>${match.group(1)}</sub>',
-    );
-
-    // Resaltado: ==text== → <mark>text</mark>
-    result = result.replaceAllMapped(
-      RegExp(r'==([^=]+)=='),
-      (match) => '<mark>${match.group(1)}</mark>',
-    );
-
-    return result;
+      // Resaltado: ==text== → <mark>text</mark>
+      l = l.replaceAllMapped(
+        RegExp(r'(?<!\\)==([^=]+)==(?!=)'),
+        (m) => '<mark>${m.group(1)}</mark>',
+      );
+      lineas[i] = l;
+    }
+    return lineas.join('\n');
   }
 
   static void _processNode(md.Node node, List<Map<String, dynamic>> deltaOps) {
@@ -348,14 +510,45 @@ class MarkdownToQuill {
           deltaOps.add({'insert': '\n'});
           break;
         case 'pre':
-          final codeText = _extractText(node);
-          deltaOps.add({'insert': codeText});
-          deltaOps.add({
-            'insert': '\n',
-            'attributes': {'code-block': true}
-          });
+          // Un salto de línea con atributo code-block por CADA línea (formato Delta estándar)
+          var codeText = _extractText(node);
+          if (codeText.endsWith('\n')) {
+            codeText = codeText.substring(0, codeText.length - 1);
+          }
+          for (final linea in codeText.split('\n')) {
+            if (linea.isNotEmpty) deltaOps.add({'insert': linea});
+            deltaOps.add({
+              'insert': '\n',
+              'attributes': {'code-block': true}
+            });
+          }
           break;
         case 'blockquote':
+          // Cada párrafo de la cita genera su propia línea con blockquote
+          final hayParrafos = (node.children ?? [])
+              .any((c) => c is md.Element && c.tag == 'p');
+          if (hayParrafos) {
+            for (final hijo in node.children!) {
+              if (hijo is md.Element && hijo.tag == 'p') {
+                _processInlineChildren(hijo, deltaOps, null);
+                deltaOps.add({
+                  'insert': '\n',
+                  'attributes': {'blockquote': true}
+                });
+              } else if (hijo is md.Text) {
+                if (hijo.text.trim().isNotEmpty) {
+                  deltaOps.add({'insert': hijo.text.trim()});
+                  deltaOps.add({
+                    'insert': '\n',
+                    'attributes': {'blockquote': true}
+                  });
+                }
+              } else {
+                _processNode(hijo, deltaOps);
+              }
+            }
+            break;
+          }
           _processInlineChildren(node, deltaOps, null);
           deltaOps.add({
             'insert': '\n',
@@ -363,47 +556,10 @@ class MarkdownToQuill {
           });
           break;
         case 'ul':
-          for (final child in node.children ?? []) {
-            if (child is md.Element && child.tag == 'li') {
-              // Detectar si es lista de tareas
-              final text = _extractText(child);
-              if (text.trim().startsWith('[ ]')) {
-                // Tarea sin completar - usar solo texto plano
-                final cleanText = text.trim().substring(3).trim();
-                deltaOps.add({'insert': cleanText});
-                deltaOps.add({
-                  'insert': '\n',
-                  'attributes': {'list': 'unchecked'}
-                });
-              } else if (text.trim().startsWith('[x]') || text.trim().startsWith('[X]')) {
-                // Tarea completada - usar solo texto plano
-                final cleanText = text.trim().substring(3).trim();
-                deltaOps.add({'insert': cleanText});
-                deltaOps.add({
-                  'insert': '\n',
-                  'attributes': {'list': 'checked'}
-                });
-              } else {
-                // Lista normal - procesar con formatos inline
-                _processInlineChildren(child, deltaOps, null);
-                deltaOps.add({
-                  'insert': '\n',
-                  'attributes': {'list': 'bullet'}
-                });
-              }
-            }
-          }
+          _procesarLista(node, deltaOps, false, 0);
           break;
         case 'ol':
-          for (final child in node.children ?? []) {
-            if (child is md.Element && child.tag == 'li') {
-              _processInlineChildren(child, deltaOps, null);
-              deltaOps.add({
-                'insert': '\n',
-                'attributes': {'list': 'ordered'}
-              });
-            }
-          }
+          _procesarLista(node, deltaOps, true, 0);
           break;
         case 'a':
           // Enlaces: [text](url) o [text](url "title")
@@ -470,6 +626,58 @@ class MarkdownToQuill {
     } else if (node is md.Text) {
       if (node.text.isNotEmpty) {
         deltaOps.add({'insert': node.text});
+      }
+    }
+  }
+
+  /// Procesa una lista (`ul`/`ol`) respetando el anidamiento: cada nivel
+  /// extra añade `indent` al salto de línea del ítem (formato Quill).
+  static void _procesarLista(
+    md.Element lista,
+    List<Map<String, dynamic>> deltaOps,
+    bool ordenada,
+    int nivel,
+  ) {
+    for (final child in lista.children ?? <md.Node>[]) {
+      if (child is! md.Element) continue;
+      if (child.tag == 'ul' || child.tag == 'ol') {
+        // Lista anidada colgando directamente de otra lista
+        _procesarLista(child, deltaOps, child.tag == 'ol', nivel + 1);
+        continue;
+      }
+      if (child.tag != 'li') continue;
+
+      final propios = <md.Node>[];
+      final anidadas = <md.Element>[];
+      for (final h in child.children ?? <md.Node>[]) {
+        if (h is md.Element && (h.tag == 'ul' || h.tag == 'ol')) {
+          anidadas.add(h);
+        } else {
+          propios.add(h);
+        }
+      }
+      final liPropio = md.Element('li', propios);
+      final texto = _extractText(liPropio).trim();
+
+      String tipo = ordenada ? 'ordered' : 'bullet';
+      var itemOps = <Map<String, dynamic>>[];
+      if (!ordenada && texto.startsWith('[ ]')) {
+        tipo = 'unchecked';
+        itemOps.add({'insert': texto.substring(3).trim()});
+      } else if (!ordenada && (texto.startsWith('[x]') || texto.startsWith('[X]'))) {
+        tipo = 'checked';
+        itemOps.add({'insert': texto.substring(3).trim()});
+      } else {
+        _processInlineChildren(liPropio, itemOps, null);
+      }
+      deltaOps.addAll(itemOps);
+      deltaOps.add({
+        'insert': '\n',
+        'attributes': {'list': tipo, if (nivel > 0) 'indent': nivel},
+      });
+
+      for (final sub in anidadas) {
+        _procesarLista(sub, deltaOps, sub.tag == 'ol', nivel + 1);
       }
     }
   }
@@ -662,6 +870,9 @@ class MarkdownToQuill {
       RegExp(r'^\s*\d+\.\s', multiLine: true), // Listas numeradas
       RegExp(r'^\s{4,}[-*+]\s', multiLine: true), // Listas anidadas (4+ espacios)
       RegExp(r'^\s*-\s\[[ xX]\]', multiLine: true), // Task lists
+
+      RegExp(r'^\s*[•◦▪‣∙●]\s', multiLine: true), // Viñetas tipográficas
+      RegExp(r'^\s*[–—]\s.+\n\s*[–—]\s', multiLine: true), // Racha de guiones largos
 
       // CITAS
       RegExp(r'^\s*>\s', multiLine: true),     // Blockquotes

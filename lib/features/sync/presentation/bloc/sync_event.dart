@@ -7,23 +7,24 @@ abstract class SyncEvent extends Equatable {
   List<Object?> get props => [];
 }
 
-/// Triggered manually by the user to perform a full sync.
+/// Sincronización completa pedida por el usuario ("Sincronizar ahora"):
+/// descarga de Supabase y sube todas las notas y cursos locales.
 class SyncStarted extends SyncEvent {
   const SyncStarted();
 }
 
-/// Triggered to pull remote changes only.
+/// Solo descargar cambios remotos (sincronización heredada con Drift).
 class SyncPullRequested extends SyncEvent {
   const SyncPullRequested();
 }
 
-/// Triggered to push local changes only.
+/// Solo subir cambios locales (sincronización heredada con Drift).
 class SyncPushRequested extends SyncEvent {
   const SyncPushRequested();
 }
 
-/// Triggered automatically (e.g., on app resume, after auth).
-/// Syncs silently without showing loading indicators.
+/// Sincronización automática (al arrancar o tras iniciar sesión).
+/// Es silenciosa: no muestra indicadores de carga.
 class SyncAutoStarted extends SyncEvent {
   const SyncAutoStarted();
 }

@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'annotations_painter.dart';
@@ -13,6 +16,11 @@ class ImageFullscreenViewer extends StatefulWidget {
   final bool isStudyMode;
   final bool initialShowOcclusions;
   final bool initialShowAnnotations;
+  /// Oclusiones ya destapadas al abrir (modo estudio).
+  final Set<int> initialRevealedOcclusions;
+  /// Se llama cada vez que se destapa/tapa una oclusión (modo estudio),
+  /// para sincronizar con el visor del documento.
+  final ValueChanged<Set<int>>? onRevealedChanged;
 
   const ImageFullscreenViewer({
     super.key,
@@ -23,6 +31,8 @@ class ImageFullscreenViewer extends StatefulWidget {
     this.isStudyMode = false,
     this.initialShowOcclusions = true,
     this.initialShowAnnotations = true,
+    this.initialRevealedOcclusions = const {},
+    this.onRevealedChanged,
   });
 
   @override
@@ -43,6 +53,7 @@ class _ImageFullscreenViewerState extends State<ImageFullscreenViewer> {
     super.initState();
     _showOcclusions = widget.initialShowOcclusions;
     _showAnnotations = widget.initialShowAnnotations;
+    _revealedOcclusions.addAll(widget.initialRevealedOcclusions);
     _loadImageSize();
   }
 
@@ -78,21 +89,27 @@ class _ImageFullscreenViewerState extends State<ImageFullscreenViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): () => Navigator.maybePop(context),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // GestureDetector FUERA del InteractiveViewer para capturar taps correctamente
-          GestureDetector(
-            onTapUp: widget.isStudyMode ? _handleTap : null,
-            behavior: HitTestBehavior.translucent,
-            child: InteractiveViewer(
-              transformationController: _transformController,
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: Center(
-                child: _buildImageWithOverlays(),
-              ),
+          // La imagen se escala para llenar la pantalla (también si es más
+          // pequeña que ella). El tap se detecta en coordenadas locales de la
+          // imagen, así que funciona igual con zoom y desplazamiento.
+          InteractiveViewer(
+            transformationController: _transformController,
+            minScale: 0.5,
+            maxScale: 6.0,
+            child: Padding(
+              // Deja libre la franja inferior de los controles
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 76),
+              child: _buildImageWithOverlays(),
             ),
           ),
 
@@ -119,6 +136,8 @@ class _ImageFullscreenViewerState extends State<ImageFullscreenViewer> {
           _buildControls(),
         ],
       ),
+        ),
+      ),
     );
   }
 
@@ -129,36 +148,52 @@ class _ImageFullscreenViewerState extends State<ImageFullscreenViewer> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        return Stack(
-          key: _imageKey,
-          alignment: Alignment.center,
-          children: [
-            // 1. Imagen base
-            _buildImage(),
+        // Tamaño "contain" que aprovecha todo el espacio disponible
+        final natural = _imageNaturalSize!;
+        final escala = math.min(
+          constraints.maxWidth / natural.width,
+          constraints.maxHeight / natural.height,
+        );
+        final tamano = Size(natural.width * escala, natural.height * escala);
 
-            // 2. Oclusiones (si visible)
-            if (widget.occlusions.isNotEmpty && _showOcclusions)
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: _OcclusionOverlayPainter(
-                    occlusions: widget.occlusions,
-                    revealedIndices: _revealedOcclusions,
-                    isStudyMode: widget.isStudyMode,
-                  ),
-                ),
-              ),
+        return Center(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: widget.isStudyMode
+                ? (d) => _handleTap(d.localPosition, tamano)
+                : null,
+            child: SizedBox(
+              width: tamano.width,
+              height: tamano.height,
+              child: Stack(
+                key: _imageKey,
+                fit: StackFit.expand,
+                children: [
+                  // 1. Imagen base
+                  _buildImage(),
 
-            // 3. Anotaciones (si visible)
-            if (_showAnnotations && (widget.annotations.isNotEmpty || widget.drawings.isNotEmpty))
-              Positioned.fill(
-                child: CustomPaint(
-                  painter: AnnotationsPainter(
-                    annotations: widget.annotations,
-                    drawings: widget.drawings,
-                  ),
-                ),
+                  // 2. Oclusiones (si visible)
+                  if (widget.occlusions.isNotEmpty && _showOcclusions)
+                    CustomPaint(
+                      painter: _OcclusionOverlayPainter(
+                        occlusions: widget.occlusions,
+                        revealedIndices: Set.of(_revealedOcclusions),
+                        isStudyMode: widget.isStudyMode,
+                      ),
+                    ),
+
+                  // 3. Anotaciones (si visible)
+                  if (_showAnnotations && (widget.annotations.isNotEmpty || widget.drawings.isNotEmpty))
+                    CustomPaint(
+                      painter: AnnotationsPainter(
+                        annotations: widget.annotations,
+                        drawings: widget.drawings,
+                      ),
+                    ),
+                ],
               ),
-          ],
+            ),
+          ),
         );
       },
     );
@@ -168,14 +203,14 @@ class _ImageFullscreenViewerState extends State<ImageFullscreenViewer> {
     if (widget.imagePath.startsWith('http')) {
       return CachedNetworkImage(
         imageUrl: widget.imagePath,
-        fit: BoxFit.contain,
+        fit: BoxFit.fill,
         placeholder: (context, url) => const Center(child: CircularProgressIndicator()),
         errorWidget: (context, url, error) => const Icon(Icons.error, color: Colors.white),
       );
     } else {
       return Image.file(
         File(widget.imagePath),
-        fit: BoxFit.contain,
+        fit: BoxFit.fill,
       );
     }
   }
@@ -206,6 +241,19 @@ class _ImageFullscreenViewerState extends State<ImageFullscreenViewer> {
                     tooltip: 'Toggle oclusiones',
                     onPressed: () => setState(() => _showOcclusions = !_showOcclusions),
                   ),
+                if (widget.isStudyMode && widget.occlusions.isNotEmpty) ...[
+                  IconButton(
+                    icon: const Icon(Icons.lock_open),
+                    tooltip: 'Destapar todas',
+                    onPressed: () => _fijarReveladas(
+                        Set.of(List.generate(widget.occlusions.length, (i) => i))),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.lock),
+                    tooltip: 'Tapar todas',
+                    onPressed: () => _fijarReveladas(<int>{}),
+                  ),
+                ],
                 if (widget.annotations.isNotEmpty || widget.drawings.isNotEmpty)
                   IconButton(
                     icon: Icon(_showAnnotations
@@ -254,80 +302,45 @@ class _ImageFullscreenViewerState extends State<ImageFullscreenViewer> {
     _transformController.value = Matrix4.identity();
   }
 
-  void _handleTap(TapUpDetails details) {
-    if (!widget.isStudyMode || _imageNaturalSize == null) return;
+  void _fijarReveladas(Set<int> reveladas) {
+    setState(() {
+      _revealedOcclusions
+        ..clear()
+        ..addAll(reveladas);
+    });
+    widget.onRevealedChanged?.call(Set.of(_revealedOcclusions));
+  }
 
-    // Obtener la posición del tap en coordenadas de pantalla
-    final tapPosition = details.globalPosition;
+  /// Clic sobre una tapa: la destapa; clic sobre una ya destapada: la vuelve
+  /// a tapar. [local] está en coordenadas de la imagen mostrada ([tamano]).
+  void _handleTap(Offset local, Size tamano) {
+    if (!widget.isStudyMode || tamano.isEmpty) return;
+    if (!_showOcclusions) return;
 
-    // Obtener el tamaño de la pantalla
-    final screenSize = MediaQuery.of(context).size;
-
-    // Calcular el tamaño renderizado de la imagen con BoxFit.contain
-    final imageSize = _imageNaturalSize!;
-    final imageAspectRatio = imageSize.width / imageSize.height;
-    final screenAspectRatio = screenSize.width / screenSize.height;
-
-    double renderedWidth, renderedHeight;
-
-    if (imageAspectRatio > screenAspectRatio) {
-      // Imagen más ancha - limitada por el ancho
-      renderedWidth = screenSize.width;
-      renderedHeight = screenSize.width / imageAspectRatio;
-    } else {
-      // Imagen más alta - limitada por la altura
-      renderedHeight = screenSize.height;
-      renderedWidth = screenSize.height * imageAspectRatio;
-    }
-
-    // Obtener la transformación actual del InteractiveViewer
-    final matrix = _transformController.value;
-    final scale = matrix.getMaxScaleOnAxis();
-    final translation = matrix.getTranslation();
-
-    // Ajustar por la transformación (zoom y pan)
-    // El centro de la imagen se mueve con la transformación
-    final centerX = screenSize.width / 2;
-    final centerY = screenSize.height / 2;
-
-    // Calcular la posición del tap relativa al centro, considerando la transformación
-    final tapFromCenterX = (tapPosition.dx - centerX - translation.x) / scale;
-    final tapFromCenterY = (tapPosition.dy - centerY - translation.y) / scale;
-
-    // Convertir a posición relativa a la imagen (desde la esquina superior izquierda)
-    final tapOnImageX = tapFromCenterX + renderedWidth / 2;
-    final tapOnImageY = tapFromCenterY + renderedHeight / 2;
-
-    // Normalizar a coordenadas 0.0 - 1.0
-    final normalizedX = tapOnImageX / renderedWidth;
-    final normalizedY = tapOnImageY / renderedHeight;
-
-    // Verificar si el tap está dentro del área de la imagen
+    final normalizedX = local.dx / tamano.width;
+    final normalizedY = local.dy / tamano.height;
     if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) {
       return;
     }
 
-    // Buscar qué oclusión se tocó
-    for (var i = 0; i < widget.occlusions.length; i++) {
-      if (_revealedOcclusions.contains(i)) continue;
-
-      final occlusion = widget.occlusions[i];
-      final left = (occlusion['left'] as num).toDouble();
-      final top = (occlusion['top'] as num).toDouble();
-      final right = (occlusion['right'] as num).toDouble();
-      final bottom = (occlusion['bottom'] as num).toDouble();
-
-      if (normalizedX >= left &&
-          normalizedX <= right &&
-          normalizedY >= top &&
-          normalizedY <= bottom) {
+    // Recorrer de la última a la primera: la tapa pintada encima gana
+    for (var i = widget.occlusions.length - 1; i >= 0; i--) {
+      final r = _rectNormalizado(widget.occlusions[i]);
+      if (r.contains(Offset(normalizedX, normalizedY))) {
         setState(() {
-          _revealedOcclusions.add(i);
+          if (!_revealedOcclusions.remove(i)) _revealedOcclusions.add(i);
         });
+        widget.onRevealedChanged?.call(Set.of(_revealedOcclusions));
         break;
       }
     }
   }
+}
+
+/// Oclusión normalizada ({left, top, right, bottom} en 0-1) limitada a [0, 1].
+Rect _rectNormalizado(Map<String, dynamic> o) {
+  double leer(String k) => ((o[k] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0);
+  return Rect.fromLTRB(leer('left'), leer('top'), leer('right'), leer('bottom'));
 }
 
 /// CustomPainter para overlay de oclusiones
@@ -360,12 +373,12 @@ class _OcclusionOverlayPainter extends CustomPainter {
     for (var i = 0; i < occlusions.length; i++) {
       if (revealedIndices.contains(i)) continue;
 
-      final occlusion = occlusions[i];
+      final n = _rectNormalizado(occlusions[i]);
       final rect = Rect.fromLTRB(
-        (occlusion['left'] as num).toDouble() * size.width,
-        (occlusion['top'] as num).toDouble() * size.height,
-        (occlusion['right'] as num).toDouble() * size.width,
-        (occlusion['bottom'] as num).toDouble() * size.height,
+        n.left * size.width,
+        n.top * size.height,
+        n.right * size.width,
+        n.bottom * size.height,
       );
 
       canvas.drawRect(rect, paint);
@@ -376,7 +389,7 @@ class _OcclusionOverlayPainter extends CustomPainter {
   @override
   bool shouldRepaint(_OcclusionOverlayPainter oldDelegate) {
     return occlusions != oldDelegate.occlusions ||
-        revealedIndices != oldDelegate.revealedIndices ||
+        !setEquals(revealedIndices, oldDelegate.revealedIndices) ||
         isStudyMode != oldDelegate.isStudyMode;
   }
 }
